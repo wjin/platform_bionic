@@ -30,7 +30,6 @@
 
 #include <errno.h>
 #include <limits.h>
-#include <sys/atomics.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
@@ -39,7 +38,8 @@
 #include "private/bionic_atomic_inline.h"
 #include "private/bionic_futex.h"
 #include "private/bionic_tls.h"
-#include "private/thread_private.h"
+
+#include "private/bionic_systrace.h"
 
 extern void pthread_debug_mutex_lock_check(pthread_mutex_t *mutex);
 extern void pthread_debug_mutex_unlock_check(pthread_mutex_t *mutex);
@@ -307,9 +307,7 @@ int pthread_mutex_init(pthread_mutex_t* mutex, const pthread_mutexattr_t* attr) 
  * "type" value is zero, so the only bits that will be set are the ones in
  * the lock state field.
  */
-static __inline__ void
-_normal_lock(pthread_mutex_t*  mutex, int shared)
-{
+static inline void _normal_lock(pthread_mutex_t* mutex, int shared) {
     /* convenience shortcuts */
     const int unlocked           = shared | MUTEX_STATE_BITS_UNLOCKED;
     const int locked_uncontended = shared | MUTEX_STATE_BITS_LOCKED_UNCONTENDED;
@@ -337,8 +335,13 @@ _normal_lock(pthread_mutex_t*  mutex, int shared)
          * that the mutex is in state 2 when we go to sleep on it, which
          * guarantees a wake-up call.
          */
-        while (__bionic_swap(locked_contended, &mutex->value) != unlocked)
-            __futex_wait_ex(&mutex->value, shared, locked_contended, 0);
+
+         ScopedTrace trace("Contending for pthread mutex");
+
+
+        while (__bionic_swap(locked_contended, &mutex->value) != unlocked) {
+            __futex_wait_ex(&mutex->value, shared, locked_contended, NULL);
+        }
     }
     ANDROID_MEMBAR_FULL();
 }
@@ -347,9 +350,7 @@ _normal_lock(pthread_mutex_t*  mutex, int shared)
  * Release a non-recursive mutex.  The caller is responsible for determining
  * that we are in fact the owner of this lock.
  */
-static __inline__ void
-_normal_unlock(pthread_mutex_t*  mutex, int shared)
-{
+static inline void _normal_unlock(pthread_mutex_t* mutex, int shared) {
     ANDROID_MEMBAR_FULL();
 
     /*
@@ -411,9 +412,7 @@ _normal_unlock(pthread_mutex_t*  mutex, int shared)
  * mvalue is the current mutex value (already loaded)
  * mutex pointers to the mutex.
  */
-static __inline__ __attribute__((always_inline)) int
-_recursive_increment(pthread_mutex_t* mutex, int mvalue, int mtype)
-{
+static inline __always_inline int _recursive_increment(pthread_mutex_t* mutex, int mvalue, int mtype) {
     if (mtype == MUTEX_TYPE_BITS_ERRORCHECK) {
         /* trying to re-lock a mutex we already acquired */
         return EDEADLK;
@@ -446,16 +445,14 @@ _recursive_increment(pthread_mutex_t* mutex, int mvalue, int mtype)
     }
 }
 
-__LIBC_HIDDEN__
-int pthread_mutex_lock_impl(pthread_mutex_t *mutex)
-{
+int pthread_mutex_lock(pthread_mutex_t* mutex) {
     int mvalue, mtype, tid, shared;
 
     mvalue = mutex->value;
     mtype = (mvalue & MUTEX_TYPE_MASK);
     shared = (mvalue & MUTEX_SHARED_MASK);
 
-    /* Handle normal case first */
+    /* Handle non-recursive case first */
     if ( __predict_true(mtype == MUTEX_TYPE_BITS_NORMAL) ) {
         _normal_lock(mutex, shared);
         return 0;
@@ -481,6 +478,8 @@ int pthread_mutex_lock_impl(pthread_mutex_t *mutex)
         /* argh, the value changed, reload before entering the loop */
         mvalue = mutex->value;
     }
+
+    ScopedTrace trace("Contending for pthread mutex");
 
     for (;;) {
         int newval;
@@ -524,20 +523,7 @@ int pthread_mutex_lock_impl(pthread_mutex_t *mutex)
     /* NOTREACHED */
 }
 
-int pthread_mutex_lock(pthread_mutex_t *mutex)
-{
-    int err = pthread_mutex_lock_impl(mutex);
-    if (PTHREAD_DEBUG_ENABLED) {
-        if (!err) {
-            pthread_debug_mutex_lock_check(mutex);
-        }
-    }
-    return err;
-}
-
-__LIBC_HIDDEN__
-int pthread_mutex_unlock_impl(pthread_mutex_t *mutex)
-{
+int pthread_mutex_unlock(pthread_mutex_t* mutex) {
     int mvalue, mtype, tid, shared;
 
     mvalue = mutex->value;
@@ -589,17 +575,7 @@ int pthread_mutex_unlock_impl(pthread_mutex_t *mutex)
     return 0;
 }
 
-int pthread_mutex_unlock(pthread_mutex_t *mutex)
-{
-    if (PTHREAD_DEBUG_ENABLED) {
-        pthread_debug_mutex_unlock_check(mutex);
-    }
-    return pthread_mutex_unlock_impl(mutex);
-}
-
-__LIBC_HIDDEN__
-int pthread_mutex_trylock_impl(pthread_mutex_t *mutex)
-{
+int pthread_mutex_trylock(pthread_mutex_t* mutex) {
     int mvalue, mtype, tid, shared;
 
     mvalue = mutex->value;
@@ -639,17 +615,6 @@ int pthread_mutex_trylock_impl(pthread_mutex_t *mutex)
     return EBUSY;
 }
 
-int pthread_mutex_trylock(pthread_mutex_t *mutex)
-{
-    int err = pthread_mutex_trylock_impl(mutex);
-    if (PTHREAD_DEBUG_ENABLED) {
-        if (!err) {
-            pthread_debug_mutex_lock_check(mutex);
-        }
-    }
-    return err;
-}
-
 static int __pthread_mutex_timedlock(pthread_mutex_t* mutex, const timespec* abs_timeout, clockid_t clock) {
   timespec ts;
 
@@ -668,6 +633,8 @@ static int __pthread_mutex_timedlock(pthread_mutex_t* mutex, const timespec* abs
       ANDROID_MEMBAR_FULL();
       return 0;
     }
+
+    ScopedTrace trace("Contending for timed pthread mutex");
 
     // Loop while needed.
     while (__bionic_swap(locked_contended, &mutex->value) != unlocked) {
@@ -700,6 +667,8 @@ static int __pthread_mutex_timedlock(pthread_mutex_t* mutex, const timespec* abs
     }
     mvalue = mutex->value;
   }
+
+  ScopedTrace trace("Contending for timed pthread mutex");
 
   while (true) {
     // If the value is 'unlocked', try to acquire it directly.
@@ -762,16 +731,11 @@ extern "C" int pthread_mutex_lock_timeout_np(pthread_mutex_t* mutex, unsigned ms
     abs_timeout.tv_nsec -= 1000000000;
   }
 
-  int err = __pthread_mutex_timedlock(mutex, &abs_timeout, CLOCK_MONOTONIC);
-  if (err == ETIMEDOUT) {
-    err = EBUSY;
+  int error = __pthread_mutex_timedlock(mutex, &abs_timeout, CLOCK_MONOTONIC);
+  if (error == ETIMEDOUT) {
+    error = EBUSY;
   }
-  if (PTHREAD_DEBUG_ENABLED) {
-    if (!err) {
-      pthread_debug_mutex_lock_check(mutex);
-    }
-  }
-  return err;
+  return error;
 }
 #endif
 
@@ -779,16 +743,12 @@ int pthread_mutex_timedlock(pthread_mutex_t* mutex, const timespec* abs_timeout)
   return __pthread_mutex_timedlock(mutex, abs_timeout, CLOCK_REALTIME);
 }
 
-int pthread_mutex_destroy(pthread_mutex_t *mutex)
-{
-    int ret;
-
-    /* use trylock to ensure that the mutex value is
-     * valid and is not already locked. */
-    ret = pthread_mutex_trylock_impl(mutex);
-    if (ret != 0)
-        return ret;
-
-    mutex->value = 0xdead10cc;
-    return 0;
+int pthread_mutex_destroy(pthread_mutex_t* mutex) {
+  // Use trylock to ensure that the mutex is valid and not already locked.
+  int error = pthread_mutex_trylock(mutex);
+  if (error != 0) {
+    return error;
+  }
+  mutex->value = 0xdead10cc;
+  return 0;
 }

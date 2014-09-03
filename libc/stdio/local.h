@@ -32,19 +32,35 @@
  * SUCH DAMAGE.
  */
 
-#include "wcio.h"
-#include "fileext.h"
-
-
 /*
  * Information local to this implementation of stdio,
  * in particular, macros and private variables.
  */
 
+#include <wchar.h>
+#include "wcio.h"
+#include "fileext.h"
+
+#if defined(__LP64__)
+/*
+ * Android <= KitKat had getc/putc macros in <stdio.h> that referred
+ * to __srget/__swbuf, so those symbols need to be public for LP32
+ * but can be hidden for LP64.
+ */
+__LIBC_HIDDEN__ int __srget(FILE*);
+__LIBC_HIDDEN__ int __swbuf(int, FILE*);
+__LIBC_HIDDEN__ int __srefill(FILE*);
+#else
+__LIBC_ABI_PUBLIC__ int __srget(FILE*);
+__LIBC_ABI_PUBLIC__ int __swbuf(int, FILE*);
+__LIBC_ABI_PUBLIC__ int __srefill(FILE*);
+#endif
+
+#pragma GCC visibility push(hidden)
+
 int	__sflush(FILE *);
 int	__sflush_locked(FILE *);
 FILE	*__sfp(void);
-int	__srefill(FILE *);
 int	__sread(void *, char *, int);
 int	__swrite(void *, const char *, int);
 fpos_t	__sseek(void *, fpos_t, int);
@@ -56,12 +72,14 @@ int	__swhatbuf(FILE *, size_t *, int *);
 int	_fwalk(int (*)(FILE *));
 int	__swsetup(FILE *);
 int	__sflags(const char *, int *);
+wint_t __fgetwc_unlock(FILE *);
+wint_t	__ungetwc(wint_t, FILE *);
 int	__vfprintf(FILE *, const char *, __va_list);
+int	__svfscanf(FILE * __restrict, const char * __restrict, __va_list);
+int	__vfwprintf(FILE * __restrict, const wchar_t * __restrict, __va_list);
+int	__vfwscanf(FILE * __restrict, const wchar_t * __restrict, __va_list);
 
-/*
- * Function to clean up streams, called from abort() and exit().
- */
-extern void (*__cleanup)(void);
+extern void __atexit_register_cleanup(void (*)(void));
 extern int __sdidinit;
 
 /*
@@ -95,12 +113,13 @@ extern int __sdidinit;
 #define FUNLOCKFILE(fp) funlockfile(fp)
 
 #define FLOATING_POINT
+#define PRINTF_WIDE_CHAR
+#define SCANF_WIDE_CHAR
+#define NO_PRINTF_PERCENT_N
 
 /* OpenBSD exposes these in <stdio.h>, but we only want them exposed to the implementation. */
-__BEGIN_DECLS
 int __srget(FILE*);
 int __swbuf(int, FILE*);
-__END_DECLS
 #define __sfeof(p)     (((p)->_flags & __SEOF) != 0)
 #define __sferror(p)   (((p)->_flags & __SERR) != 0)
 #define __sclearerr(p) ((void)((p)->_flags &= ~(__SERR|__SEOF)))
@@ -113,3 +132,10 @@ static __inline int __sputc(int _c, FILE* _p) {
     return (__swbuf(_c, _p));
   }
 }
+
+/* OpenBSD declares these in fvwrite.h but we want to ensure they're hidden. */
+struct __suio;
+extern int __sfvwrite(FILE *, struct __suio *);
+wint_t __fputwc_unlock(wchar_t wc, FILE *fp);
+
+#pragma GCC visibility pop

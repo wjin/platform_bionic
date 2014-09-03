@@ -7,6 +7,8 @@
 
 #include <pthread.h>
 
+__BEGIN_DECLS
+
 /*
  * This file defines the thread library interface to libc.  Thread
  * libraries must implement the functions described here for proper
@@ -31,10 +33,23 @@ struct __thread_private_tag_t {
 #define _THREAD_PRIVATE_MUTEX_UNLOCK(name) \
 	pthread_mutex_unlock( &__THREAD_NAME(name)._private_lock )
 
-void	_thread_atexit_lock(void);
-void	_thread_atexit_unlock(void);
+/* Note that these aren't compatible with the usual OpenBSD ones which lazy-initialize! */
+#define _MUTEX_LOCK(l) pthread_mutex_lock((pthread_mutex_t*) l)
+#define _MUTEX_UNLOCK(l) pthread_mutex_unlock((pthread_mutex_t*) l)
+
+__LIBC_HIDDEN__ void  _thread_atexit_lock(void);
+__LIBC_HIDDEN__ void  _thread_atexit_unlock(void);
 
 #define _ATEXIT_LOCK() _thread_atexit_lock()
 #define _ATEXIT_UNLOCK() _thread_atexit_unlock()
+
+__LIBC_HIDDEN__ void    _thread_arc4_lock(void);
+__LIBC_HIDDEN__ void    _thread_arc4_unlock(void);
+
+#define _ARC4_LOCK() _thread_arc4_lock()
+#define _ARC4_UNLOCK() _thread_arc4_unlock()
+#define _ARC4_ATFORK(f) pthread_atfork(NULL, NULL, (f))
+
+__END_DECLS
 
 #endif /* _THREAD_PRIVATE_H_ */

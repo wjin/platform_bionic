@@ -25,6 +25,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #ifndef _LIBGEN_H
 #define _LIBGEN_H
 
@@ -33,9 +34,18 @@
 
 __BEGIN_DECLS
 
+#if !defined(__bionic_using_gnu_basename)
+/*
+ * <string.h> gets you the GNU basename.
+ * <libgen.h> the POSIX one.
+ * Note that our "POSIX" one has the wrong argument cv-qualifiers.
+ */
+extern char* basename(const char*);
+#define __bionic_using_posix_basename
+#endif
+
 /* our version of dirname/basename don't modify the input path */
 extern char*  dirname (const char*  path);
-extern char*  basename(const char*  path);
 
 /* special thread-safe Bionic versions
  *

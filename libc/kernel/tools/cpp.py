@@ -685,9 +685,9 @@ class CppExpr:
         # we have the defined keyword, check the rest
         self.i += 1
         self.skip_spaces()
-        use_parens = 0
+        used_parens = 0
         if self.i < self.n and self.tok[self.i].id == tokLPAREN:
-            use_parens = 1
+            used_parens = 1
             self.i += 1
             self.skip_spaces()
 
@@ -699,7 +699,7 @@ class CppExpr:
             self.throw(CppConstantExpected,i,"### 'defined' must be followed by macro name")
 
         self.i += 1
-        if use_parens:
+        if used_parens:
             self.expectId(tokRPAREN)
 
         return ("defined", t.value)
@@ -1162,7 +1162,7 @@ class Block:
         return self.directive in ["if","ifdef","ifndef","elif"]
 
     def isInclude(self):
-        """checks wether this is a #include directive. if true, then returns the
+        """checks whether this is a #include directive. if true, then returns the
            corresponding file name (with brackets or double-qoutes). None otherwise"""
         if self.directive != "include":
             return None
@@ -1517,15 +1517,20 @@ class BlockList:
         tokens = tokens[:-1]  # remove trailing tokLN
         self.blocks = [ Block(tokens) ] + self.blocks
 
-    def replaceTokens(self,replacements=dict()):
-        """replace tokens according to the given dict
-           """
+    def replaceTokens(self,replacements):
+        """replace tokens according to the given dict"""
         for b in self.blocks:
-            if (not b.isDirective()) or b.isDefine():
+            made_change = False
+            if b.isInclude() == None:
                 for tok in b.tokens:
                     if tok.id == tokIDENT:
                         if tok.value in replacements:
                             tok.value = replacements[tok.value]
+                            made_change = True
+
+            if made_change and b.isIf():
+                # Keep 'expr' in sync with 'tokens'.
+                b.expr = CppExpr(b.tokens)
 
 class BlockParser:
     """a class used to convert an input source file into a BlockList object"""
@@ -1706,7 +1711,7 @@ def  optimize_if01( blocks ):
         while j < n and not blocks[j].isIf():
             j += 1
         if j > i:
-            D2("appending lines %d to %d" % (blocks[i].lineno, blocks[j-1].lineno))
+            logging.debug("appending lines %d to %d" % (blocks[i].lineno, blocks[j-1].lineno))
             result += blocks[i:j]
         if j >= n:
             break
@@ -1725,17 +1730,17 @@ def  optimize_if01( blocks ):
                 break
             dir = blocks[j].directive
             if dir == "endif":
-                D2("remove 'if 0' .. 'endif' (lines %d to %d)" % (blocks[i].lineno, blocks[j].lineno))
+                logging.debug("remove 'if 0' .. 'endif' (lines %d to %d)" % (blocks[i].lineno, blocks[j].lineno))
                 i = j + 1
             elif dir == "else":
                 # convert 'else' into 'if 1'
-                D2("convert 'if 0' .. 'else' into 'if 1' (lines %d to %d)" % (blocks[i].lineno, blocks[j-1].lineno))
+                logging.debug("convert 'if 0' .. 'else' into 'if 1' (lines %d to %d)" % (blocks[i].lineno, blocks[j-1].lineno))
                 blocks[j].directive = "if"
                 blocks[j].expr      = CppExpr( CppLineTokenizer("1").toTokenList() )
                 i = j
             elif dir == "elif":
                 # convert 'elif' into 'if'
-                D2("convert 'if 0' .. 'elif' into 'if'")
+                logging.debug("convert 'if 0' .. 'elif' into 'if'")
                 blocks[j].directive = "if"
                 i = j
             continue
@@ -1744,25 +1749,25 @@ def  optimize_if01( blocks ):
         k = find_matching_endif( blocks, j+1 )
         if k >= n:
             # unterminated #if 1, finish here
-            D2("unterminated 'if 1'")
+            logging.debug("unterminated 'if 1'")
             result += blocks[j+1:k]
             break
 
         dir = blocks[k].directive
         if dir == "endif":
-            D2("convert 'if 1' .. 'endif' (lines %d to %d)"  % (blocks[j].lineno, blocks[k].lineno))
+            logging.debug("convert 'if 1' .. 'endif' (lines %d to %d)"  % (blocks[j].lineno, blocks[k].lineno))
             result += optimize_if01(blocks[j+1:k])
             i       = k+1
         elif dir == "else":
             # convert 'else' into 'if 0'
-            D2("convert 'if 1' .. 'else' (lines %d to %d)"  % (blocks[j].lineno, blocks[k].lineno))
+            logging.debug("convert 'if 1' .. 'else' (lines %d to %d)"  % (blocks[j].lineno, blocks[k].lineno))
             result += optimize_if01(blocks[j+1:k])
             blocks[k].directive = "if"
             blocks[k].expr      = CppExpr( CppLineTokenizer("0").toTokenList() )
             i = k
         elif dir == "elif":
             # convert 'elif' into 'if 0'
-            D2("convert 'if 1' .. 'elif' (lines %d to %d)" % (blocks[j].lineno, blocks[k].lineno))
+            logging.debug("convert 'if 1' .. 'elif' (lines %d to %d)" % (blocks[j].lineno, blocks[k].lineno))
             result += optimize_if01(blocks[j+1:k])
             blocks[k].expr      = CppExpr( CppLineTokenizer("0").toTokenList() )
             i = k
@@ -1798,6 +1803,10 @@ def  test_optimizeAll():
 #define X
 #endif
 
+#ifndef SIGRTMAX
+#define SIGRTMAX 123
+#endif /* SIGRTMAX */
+
 #if 0
 #if 1
 #define  BAD_6
@@ -1817,12 +1826,16 @@ def  test_optimizeAll():
 #define X
 #endif
 
+#ifndef __SIGRTMAX
+#define __SIGRTMAX 123
+#endif
+
 """
 
     out = StringOutput()
     lines = string.split(text, '\n')
     list = BlockParser().parse( CppLinesTokenizer(lines) )
-    #D_setlevel(2)
+    list.replaceTokens( kernel_token_replacements )
     list.optimizeAll( {"__KERNEL__":kCppUndefinedMacro} )
     list.write(out)
     if out.get() != expected:

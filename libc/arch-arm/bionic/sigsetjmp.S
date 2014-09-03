@@ -33,8 +33,6 @@
  * SUCH DAMAGE.
  */
 
-#define _ALIGN_TEXT .align 0
-
 #include <private/bionic_asm.h>
 #include <machine/setjmp.h>
 
@@ -50,8 +48,8 @@
 
 ENTRY(sigsetjmp)
 	teq	r1, #0
-	beq	PIC_SYM(_setjmp, PLT)
-	b	PIC_SYM(setjmp, PLT)
+	beq	_setjmp
+	b	setjmp
 END(sigsetjmp)
 
 .L_setjmp_magic:
@@ -61,6 +59,6 @@ ENTRY(siglongjmp)
 	ldr	r2, .L_setjmp_magic
 	ldr	r3, [r0]
 	teq	r2, r3
-	beq	PIC_SYM(_longjmp, PLT)
-	b	PIC_SYM(longjmp, PLT)
+	beq	_longjmp
+	b	longjmp
 END(siglongjmp)

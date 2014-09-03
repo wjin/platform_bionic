@@ -16,6 +16,7 @@
 
 #include "benchmark.h"
 
+#include <sys/syscall.h>
 #include <unistd.h>
 
 static void BM_unistd_getpid(int iters) {
@@ -28,3 +29,39 @@ static void BM_unistd_getpid(int iters) {
   StopBenchmarkTiming();
 }
 BENCHMARK(BM_unistd_getpid);
+
+static void BM_unistd_getpid_syscall(int iters) {
+  StartBenchmarkTiming();
+
+  for (int i = 0; i < iters; ++i) {
+    syscall(__NR_getpid);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_unistd_getpid_syscall);
+
+// Stop GCC optimizing out our pure function.
+/* Must not be static! */ pid_t (*gettid_fp)() = gettid;
+
+static void BM_unistd_gettid(int iters) {
+  StartBenchmarkTiming();
+
+  for (int i = 0; i < iters; ++i) {
+    gettid_fp();
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_unistd_gettid);
+
+static void BM_unistd_gettid_syscall(int iters) {
+  StartBenchmarkTiming();
+
+  for (int i = 0; i < iters; ++i) {
+    syscall(__NR_gettid);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_unistd_gettid_syscall);

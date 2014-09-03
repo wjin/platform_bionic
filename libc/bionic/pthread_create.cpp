@@ -30,42 +30,31 @@
 
 #include <errno.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 #include "pthread_internal.h"
 
+#include "private/bionic_macros.h"
 #include "private/bionic_ssp.h"
 #include "private/bionic_tls.h"
 #include "private/libc_logging.h"
-#include "private/thread_private.h"
 #include "private/ErrnoRestorer.h"
 #include "private/ScopedPthreadMutexLocker.h"
 
-extern "C" pid_t __bionic_clone(uint32_t flags, void* child_stack, int* parent_tid, void* tls, int* child_tid, int (*fn)(void*), void* arg);
-extern "C" int __set_tls(void*);
-
-// Used by gdb to track thread creation. See libthread_db.
-#ifdef __i386__
-extern "C" __attribute__((noinline)) __attribute__((fastcall)) void _thread_created_hook(pid_t) {}
-#else
-extern "C" __attribute__((noinline)) void _thread_created_hook(pid_t) {}
+// x86 uses segment descriptors rather than a direct pointer to TLS.
+#if __i386__
+#include <asm/ldt.h>
+extern "C" __LIBC_HIDDEN__ void __init_user_desc(struct user_desc*, int, void*);
 #endif
-
-static pthread_mutex_t gPthreadStackCreationLock = PTHREAD_MUTEX_INITIALIZER;
-
-static pthread_mutex_t gDebuggerNotificationLock = PTHREAD_MUTEX_INITIALIZER;
 
 extern "C" int __isthreaded;
 
 // This code is used both by each new pthread and the code that initializes the main thread.
 void __init_tls(pthread_internal_t* thread) {
-  // Zero-initialize all the slots after TLS_SLOT_SELF and TLS_SLOT_THREAD_ID.
-  for (size_t i = TLS_SLOT_ERRNO; i < BIONIC_TLS_SLOTS; ++i) {
-    thread->tls[i] = NULL;
+  if (thread->user_allocated_stack()) {
+    // We don't know where the user got their stack, so assume the worst and zero the TLS area.
+    memset(&thread->tls[0], 0, BIONIC_TLS_SLOTS * sizeof(void*));
   }
-
-#if defined(__i386__)
-  __set_tls(thread->tls);
-#endif
 
   // Slot 0 must point to itself. The x86 Linux kernel reads the TLS from %fs:0.
   thread->tls[TLS_SLOT_SELF] = thread->tls;
@@ -77,7 +66,7 @@ void __init_tls(pthread_internal_t* thread) {
 void __init_alternate_signal_stack(pthread_internal_t* thread) {
   // Create and set an alternate signal stack.
   stack_t ss;
-  ss.ss_sp = mmap(NULL, SIGSTKSZ, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+  ss.ss_sp = mmap(NULL, SIGSTKSZ, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
   if (ss.ss_sp != MAP_FAILED) {
     ss.ss_size = SIGSTKSZ;
     ss.ss_flags = 0;
@@ -113,8 +102,6 @@ int __init_thread(pthread_internal_t* thread, bool add_to_thread_list) {
 }
 
 static void* __create_thread_stack(pthread_internal_t* thread) {
-  ScopedPthreadMutexLocker lock(&gPthreadStackCreationLock);
-
   // Create a new private anonymous map.
   int prot = PROT_READ | PROT_WRITE;
   int flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
@@ -146,11 +133,8 @@ static int __pthread_start(void* arg) {
   // notify gdb about this thread before we start doing anything.
   // This also provides the memory barrier needed to ensure that all memory
   // accesses previously made by the creating thread are visible to us.
-  pthread_mutex_t* start_mutex = (pthread_mutex_t*) &thread->tls[TLS_SLOT_START_MUTEX];
-  pthread_mutex_lock(start_mutex);
-  pthread_mutex_destroy(start_mutex);
-
-  __init_tls(thread);
+  pthread_mutex_lock(&thread->startup_handshake_mutex);
+  pthread_mutex_destroy(&thread->startup_handshake_mutex);
 
   __init_alternate_signal_stack(thread);
 
@@ -188,8 +172,8 @@ int pthread_create(pthread_t* thread_out, pthread_attr_t const* attr,
   }
 
   // Make sure the stack size and guard size are multiples of PAGE_SIZE.
-  thread->attr.stack_size = (thread->attr.stack_size + (PAGE_SIZE-1)) & ~(PAGE_SIZE-1);
-  thread->attr.guard_size = (thread->attr.guard_size + (PAGE_SIZE-1)) & ~(PAGE_SIZE-1);
+  thread->attr.stack_size = BIONIC_ALIGN(thread->attr.stack_size, PAGE_SIZE);
+  thread->attr.guard_size = BIONIC_ALIGN(thread->attr.guard_size, PAGE_SIZE);
 
   if (thread->attr.stack_base == NULL) {
     // The caller didn't provide a stack, so allocate one.
@@ -207,8 +191,10 @@ int pthread_create(pthread_t* thread_out, pthread_attr_t const* attr,
   // The child stack is the same address, just growing in the opposite direction.
   // At offsets >= 0, we have the TLS slots.
   // At offsets < 0, we have the child stack.
-  thread->tls = (void**)((uint8_t*)(thread->attr.stack_base) + thread->attr.stack_size - BIONIC_TLS_SLOTS * sizeof(void*));
+  thread->tls = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(thread->attr.stack_base) +
+                                         thread->attr.stack_size - BIONIC_TLS_SLOTS * sizeof(void*));
   void* child_stack = thread->tls;
+  __init_tls(thread);
 
   // Create a mutex for the thread in TLS to wait on once it starts so we can keep
   // it from doing anything until after we notify the debugger about it
@@ -216,31 +202,32 @@ int pthread_create(pthread_t* thread_out, pthread_attr_t const* attr,
   // This also provides the memory barrier we need to ensure that all
   // memory accesses previously performed by this thread are visible to
   // the new thread.
-  pthread_mutex_t* start_mutex = (pthread_mutex_t*) &thread->tls[TLS_SLOT_START_MUTEX];
-  pthread_mutex_init(start_mutex, NULL);
-  pthread_mutex_lock(start_mutex);
-
-  thread->tls[TLS_SLOT_THREAD_ID] = thread;
+  pthread_mutex_init(&thread->startup_handshake_mutex, NULL);
+  pthread_mutex_lock(&thread->startup_handshake_mutex);
 
   thread->start_routine = start_routine;
   thread->start_routine_arg = arg;
 
+  thread->set_cached_pid(getpid());
+
   int flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD | CLONE_SYSVSEM |
       CLONE_SETTLS | CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID;
+  void* tls = thread->tls;
 #if defined(__i386__)
   // On x86 (but not x86-64), CLONE_SETTLS takes a pointer to a struct user_desc rather than
-  // a pointer to the TLS itself. Rather than try to deal with that here, we just let x86 set
-  // the TLS manually in __init_tls, like all architectures used to.
-  flags &= ~CLONE_SETTLS;
+  // a pointer to the TLS itself.
+  user_desc tls_descriptor;
+  __init_user_desc(&tls_descriptor, false, tls);
+  tls = &tls_descriptor;
 #endif
-  int rc = __bionic_clone(flags, child_stack, &(thread->tid), thread->tls, &(thread->tid), __pthread_start, thread);
+  int rc = clone(__pthread_start, child_stack, flags, thread, &(thread->tid), tls, &(thread->tid));
   if (rc == -1) {
     int clone_errno = errno;
     // We don't have to unlock the mutex at all because clone(2) failed so there's no child waiting to
     // be unblocked, but we're about to unmap the memory the mutex is stored in, so this serves as a
     // reminder that you can't rewrite this function to use a ScopedPthreadMutexLocker.
-    pthread_mutex_unlock(start_mutex);
-    if ((thread->attr.flags & PTHREAD_ATTR_FLAG_USER_ALLOCATED_STACK) == 0) {
+    pthread_mutex_unlock(&thread->startup_handshake_mutex);
+    if (!thread->user_allocated_stack()) {
       munmap(thread->attr.stack_base, thread->attr.stack_size);
     }
     free(thread);
@@ -254,19 +241,13 @@ int pthread_create(pthread_t* thread_out, pthread_attr_t const* attr,
     // Letting the thread run is the easiest way to clean up its resources.
     thread->attr.flags |= PTHREAD_ATTR_FLAG_DETACHED;
     thread->start_routine = __do_nothing;
-    pthread_mutex_unlock(start_mutex);
+    pthread_mutex_unlock(&thread->startup_handshake_mutex);
     return init_errno;
-  }
-
-  // Notify any debuggers about the new thread.
-  {
-    ScopedPthreadMutexLocker debugger_locker(&gDebuggerNotificationLock);
-    _thread_created_hook(thread->tid);
   }
 
   // Publish the pthread_t and unlock the mutex to let the new thread start running.
   *thread_out = reinterpret_cast<pthread_t>(thread);
-  pthread_mutex_unlock(start_mutex);
+  pthread_mutex_unlock(&thread->startup_handshake_mutex);
 
   return 0;
 }

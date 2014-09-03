@@ -95,7 +95,7 @@ static int __sysconf_nprocessors_conf() {
 }
 
 static int __sysconf_nprocessors_onln() {
-  FILE* fp = fopen("/proc/stat", "r");
+  FILE* fp = fopen("/proc/stat", "re");
   if (fp == NULL) {
     return 1;
   }
@@ -118,7 +118,7 @@ static int __sysconf_nprocessors_onln() {
 }
 
 static int __get_meminfo(const char* pattern) {
-  FILE* fp = fopen("/proc/meminfo", "r");
+  FILE* fp = fopen("/proc/meminfo", "re");
   if (fp == NULL) {
     return -1;
   }
@@ -309,7 +309,7 @@ int sysconf(int name) {
       return _POSIX_THREAD_DESTRUCTOR_ITERATIONS;
 
     case _SC_THREAD_KEYS_MAX:
-      return (BIONIC_TLS_SLOTS - TLS_SLOT_FIRST_USER_SLOT - GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT);
+      return (BIONIC_TLS_SLOTS - TLS_SLOT_FIRST_USER_SLOT - BIONIC_TLS_RESERVED_SLOTS);
 
     case _SC_THREAD_STACK_MIN:    return PTHREAD_STACK_MIN;
     case _SC_THREAD_THREADS_MAX:  return SYSTEM_THREAD_THREADS_MAX;

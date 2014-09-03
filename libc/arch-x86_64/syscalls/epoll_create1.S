@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(epoll_create1)
     movl    $__NR_epoll_create1, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(epoll_create1)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(epoll_create1)

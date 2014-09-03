@@ -1,13 +1,15 @@
+ifneq ($(TARGET_USE_PRIVATE_LIBM),true)
 LOCAL_PATH:= $(call my-dir)
 
-# TODO: these come from from upstream's libc, not libm!
+# TODO: this comes from from upstream's libc, not libm, but it's an
+# implementation detail that should have hidden visibility, so it needs
+# to be in whatever library the math code is in.
 libm_common_src_files := \
     digittoint.c  \
-    fpclassify.c \
-    isinf.c  \
 
 # TODO: this is not in the BSDs.
 libm_common_src_files += \
+    significandl.c \
     sincos.c \
 
 libm_common_src_files += \
@@ -64,6 +66,7 @@ libm_common_src_files += \
     upstream-freebsd/lib/msun/src/e_sinhf.c \
     upstream-freebsd/lib/msun/src/e_sqrt.c \
     upstream-freebsd/lib/msun/src/e_sqrtf.c \
+    upstream-freebsd/lib/msun/src/imprecise.c \
     upstream-freebsd/lib/msun/src/k_cos.c \
     upstream-freebsd/lib/msun/src/k_cosf.c \
     upstream-freebsd/lib/msun/src/k_exp.c \
@@ -128,9 +131,6 @@ libm_common_src_files += \
     upstream-freebsd/lib/msun/src/s_frexpf.c \
     upstream-freebsd/lib/msun/src/s_ilogb.c \
     upstream-freebsd/lib/msun/src/s_ilogbf.c \
-    upstream-freebsd/lib/msun/src/s_isfinite.c \
-    upstream-freebsd/lib/msun/src/s_isnan.c \
-    upstream-freebsd/lib/msun/src/s_isnormal.c \
     upstream-freebsd/lib/msun/src/s_llrint.c \
     upstream-freebsd/lib/msun/src/s_llrintf.c \
     upstream-freebsd/lib/msun/src/s_llround.c \
@@ -149,7 +149,6 @@ libm_common_src_files += \
     upstream-freebsd/lib/msun/src/s_nearbyint.c \
     upstream-freebsd/lib/msun/src/s_nextafter.c \
     upstream-freebsd/lib/msun/src/s_nextafterf.c \
-    upstream-freebsd/lib/msun/src/s_nexttowardf.c \
     upstream-freebsd/lib/msun/src/s_remquo.c \
     upstream-freebsd/lib/msun/src/s_remquof.c \
     upstream-freebsd/lib/msun/src/s_rint.c \
@@ -159,7 +158,6 @@ libm_common_src_files += \
     upstream-freebsd/lib/msun/src/s_scalbln.c \
     upstream-freebsd/lib/msun/src/s_scalbn.c \
     upstream-freebsd/lib/msun/src/s_scalbnf.c \
-    upstream-freebsd/lib/msun/src/s_signbit.c \
     upstream-freebsd/lib/msun/src/s_signgam.c \
     upstream-freebsd/lib/msun/src/s_significand.c \
     upstream-freebsd/lib/msun/src/s_significandf.c \
@@ -179,6 +177,7 @@ libm_common_src_files += \
 
 libm_common_src_files += \
     fake_long_double.c \
+    signbit.c \
 
 libm_ld_src_files = \
     upstream-freebsd/lib/msun/src/e_acosl.c \
@@ -211,6 +210,7 @@ libm_ld_src_files = \
     upstream-freebsd/lib/msun/src/s_lroundl.c \
     upstream-freebsd/lib/msun/src/s_nextafterl.c \
     upstream-freebsd/lib/msun/src/s_nexttoward.c \
+    upstream-freebsd/lib/msun/src/s_nexttowardf.c \
     upstream-freebsd/lib/msun/src/s_remquol.c \
     upstream-freebsd/lib/msun/src/s_rintl.c \
     upstream-freebsd/lib/msun/src/s_roundl.c \
@@ -235,8 +235,20 @@ libm_common_cflags := \
     -DFLT_EVAL_METHOD=0 \
     -std=c99 \
     -include $(LOCAL_PATH)/freebsd-compat.h \
+    -Wno-missing-braces \
+    -Wno-parentheses \
+    -Wno-sign-compare \
+    -Wno-uninitialized \
+    -Wno-unknown-pragmas \
+    -fvisibility=hidden \
+
+# Workaround the GCC "(long)fn -> lfn" optimization bug which will result in
+# self recursions for lrint, lrintf, and lrintl.
+# BUG: 14225968
+libm_common_cflags += -fno-builtin-rint -fno-builtin-rintf -fno-builtin-rintl
 
 libm_common_includes := $(LOCAL_PATH)/upstream-freebsd/lib/msun/src/
+
 libm_ld_includes := $(LOCAL_PATH)/upstream-freebsd/lib/msun/ld128/
 
 #
@@ -255,21 +267,18 @@ LOCAL_SYSTEM_SHARED_LIBRARIES := libc
 LOCAL_C_INCLUDES_arm := $(LOCAL_PATH)/arm
 LOCAL_SRC_FILES_arm := arm/fenv.c
 
-LOCAL_C_INCLUDES_arm64 := $(LOCAL_PATH)/arm64 $(libm_ld_includes)
+LOCAL_C_INCLUDES_arm64 := $(libm_ld_includes)
 LOCAL_SRC_FILES_arm64 := arm64/fenv.c $(libm_ld_src_files)
 
-LOCAL_C_INCLUDES_x86 := $(LOCAL_PATH)/i386 $(LOCAL_PATH)/i387
+LOCAL_C_INCLUDES_x86 := $(LOCAL_PATH)/i387
 LOCAL_SRC_FILES_x86 := i387/fenv.c
 
-LOCAL_C_INCLUDES_x86_64 := $(LOCAL_PATH)/amd64 $(libm_ld_includes)
+LOCAL_C_INCLUDES_x86_64 := $(libm_ld_includes)
 LOCAL_SRC_FILES_x86_64 := amd64/fenv.c $(libm_ld_src_files)
 
-LOCAL_CFLAGS_mips := -fno-builtin-rintf -fno-builtin-rint
-LOCAL_C_INCLUDES_mips := $(LOCAL_PATH)/mips
 LOCAL_SRC_FILES_mips := mips/fenv.c
 
-LOCAL_CFLAGS_mips64 := -fno-builtin-rintf -fno-builtin-rint
-LOCAL_C_INCLUDES_mips64 := $(LOCAL_PATH)/mips $(libm_ld_includes)
+LOCAL_C_INCLUDES_mips64 := $(libm_ld_includes)
 LOCAL_SRC_FILES_mips64 := mips/fenv.c $(libm_ld_src_files)
 
 include $(BUILD_STATIC_LIBRARY)
@@ -282,4 +291,12 @@ LOCAL_MODULE:= libm
 LOCAL_ADDITIONAL_DEPENDENCIES := $(LOCAL_PATH)/Android.mk
 LOCAL_SYSTEM_SHARED_LIBRARIES := libc
 LOCAL_WHOLE_STATIC_LIBRARIES := libm
+
+# We'd really like to do this for all architectures, but since this wasn't done
+# before, these symbols must continue to be exported on LP32 for binary
+# compatibility.
+LOCAL_LDFLAGS_arm64 := -Wl,--exclude-libs,libgcc.a
+LOCAL_LDFLAGS_mips64 := -Wl,--exclude-libs,libgcc.a
+LOCAL_LDFLAGS_x86_64 := -Wl,--exclude-libs,libgcc.a
 include $(BUILD_SHARED_LIBRARY)
+endif

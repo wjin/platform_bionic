@@ -36,10 +36,8 @@
 #include <stdlib.h>
 #include <sys/auxv.h>
 #include <sys/time.h>
-#include <sys/resource.h>
 #include <unistd.h>
 
-#include "atexit.h"
 #include "private/bionic_auxv.h"
 #include "private/bionic_ssp.h"
 #include "private/bionic_tls.h"
@@ -47,10 +45,11 @@
 #include "pthread_internal.h"
 
 extern "C" abort_msg_t** __abort_message_ptr;
-extern "C" uintptr_t __get_sp(void);
 extern "C" int __system_properties_init(void);
 extern "C" int __set_tls(void* ptr);
 extern "C" int __set_tid_address(int* tid_address);
+
+__LIBC_HIDDEN__ void __libc_init_vdso();
 
 // Not public, but well-known in the BSDs.
 const char* __progname;
@@ -61,23 +60,12 @@ char** environ;
 // Declared in "private/bionic_ssp.h".
 uintptr_t __stack_chk_guard = 0;
 
-static size_t get_main_thread_stack_size() {
-  rlimit stack_limit;
-  int rlimit_result = getrlimit(RLIMIT_STACK, &stack_limit);
-  if ((rlimit_result == 0) &&
-      (stack_limit.rlim_cur != RLIM_INFINITY) &&
-      (stack_limit.rlim_cur > PTHREAD_STACK_MIN)) {
-    return (stack_limit.rlim_cur & ~(PAGE_SIZE - 1));
-  }
-  return PTHREAD_STACK_SIZE_DEFAULT;
-}
-
 /* Init TLS for the initial thread. Called by the linker _before_ libc is mapped
  * in memory. Beware: all writes to libc globals from this function will
  * apply to linker-private copies and will not be visible from libc later on.
  *
  * Note: this function creates a pthread_internal_t for the initial thread and
- * stores the pointer in TLS, but does not add it to pthread's gThreadList. This
+ * stores the pointer in TLS, but does not add it to pthread's thread list. This
  * has to be done later from libc itself (see __libc_init_common).
  *
  * This function also stores a pointer to the kernel argument block in a TLS slot to be
@@ -86,22 +74,24 @@ static size_t get_main_thread_stack_size() {
 void __libc_init_tls(KernelArgumentBlock& args) {
   __libc_auxv = args.auxv;
 
-  uintptr_t stack_top = (__get_sp() & ~(PAGE_SIZE - 1)) + PAGE_SIZE;
-  size_t stack_size = get_main_thread_stack_size();
-  uintptr_t stack_bottom = stack_top - stack_size;
-
   static void* tls[BIONIC_TLS_SLOTS];
   static pthread_internal_t main_thread;
   main_thread.tls = tls;
 
   // Tell the kernel to clear our tid field when we exit, so we're like any other pthread.
+  // As a side-effect, this tells us our pid (which is the same as the main thread's tid).
   main_thread.tid = __set_tid_address(&main_thread.tid);
+  main_thread.set_cached_pid(main_thread.tid);
 
-  // We already have a stack, and we don't want to free it up on exit (because things like
-  // environment variables with global scope live on it).
+  // We don't want to free the main thread's stack even when the main thread exits
+  // because things like environment variables with global scope live on it.
+  // We also can't free the pthread_internal_t itself, since that lives on the main
+  // thread's stack rather than on the heap.
   pthread_attr_init(&main_thread.attr);
-  pthread_attr_setstack(&main_thread.attr, (void*) stack_bottom, stack_size);
   main_thread.attr.flags = PTHREAD_ATTR_FLAG_USER_ALLOCATED_STACK | PTHREAD_ATTR_FLAG_MAIN_THREAD;
+  main_thread.attr.guard_size = 0; // The main thread has no guard page.
+  main_thread.attr.stack_size = 0; // User code should never see this; we'll compute it when asked.
+  // TODO: the main thread's sched_policy and sched_priority need to be queried.
 
   __init_thread(&main_thread, false);
   __init_tls(&main_thread);
@@ -127,6 +117,8 @@ void __libc_init_common(KernelArgumentBlock& args) {
   _pthread_internal_add(main_thread);
 
   __system_properties_init(); // Requires 'environ'.
+
+  __libc_init_vdso();
 }
 
 /* This function will be called during normal program termination

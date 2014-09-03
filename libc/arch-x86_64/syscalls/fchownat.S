@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(fchownat)
     movq    %rcx, %r10
     movl    $__NR_fchownat, %eax
@@ -11,7 +13,6 @@ ENTRY(fchownat)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(fchownat)

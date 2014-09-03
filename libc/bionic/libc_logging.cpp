@@ -29,6 +29,7 @@
 #include "../private/libc_logging.h" // Relative path so we can #include this .cpp file for testing.
 #include "../private/ScopedPthreadMutexLocker.h"
 
+#include <android/set_abort_message.h>
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -45,7 +46,7 @@
 #include <time.h>
 #include <unistd.h>
 
-static pthread_mutex_t gAbortMsgLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_abort_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 
 __LIBC_HIDDEN__ abort_msg_t** __abort_message_ptr; // Accessible to __libc_init_common.
 
@@ -74,10 +75,12 @@ struct BufferOutputStream {
       len = strlen(data);
     }
 
+    total += len;
+
     while (len > 0) {
       int avail = end_ - pos_;
       if (avail == 0) {
-        break;
+        return;
       }
       if (avail > len) {
         avail = len;
@@ -86,11 +89,10 @@ struct BufferOutputStream {
       pos_ += avail;
       pos_[0] = '\0';
       len -= avail;
-      total += avail;
     }
   }
 
-  int total;
+  size_t total;
 
  private:
   char* buffer_;
@@ -108,18 +110,19 @@ struct FdOutputStream {
       len = strlen(data);
     }
 
+    total += len;
+
     while (len > 0) {
       int rc = TEMP_FAILURE_RETRY(write(fd_, data, len));
       if (rc == -1) {
-        break;
+        return;
       }
       data += rc;
       len -= rc;
-      total += rc;
     }
   }
 
-  int total;
+  size_t total;
 
  private:
   int fd_;
@@ -453,7 +456,7 @@ static int __libc_open_log_socket()
   // found that all logd crashes thus far have had no problem stuffing
   // the UNIX domain socket and moving on so not critical *today*.
 
-  int log_fd = TEMP_FAILURE_RETRY(socket(PF_UNIX, SOCK_DGRAM, 0));
+  int log_fd = TEMP_FAILURE_RETRY(socket(PF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0));
   if (log_fd < 0) {
     return -1;
   }
@@ -495,7 +498,7 @@ static int __libc_write_log(int priority, const char* tag, const char* msg) {
   }
 
   iovec vec[6];
-  char log_id = LOG_ID_MAIN;
+  char log_id = (priority == ANDROID_LOG_FATAL) ? LOG_ID_CRASH : LOG_ID_MAIN;
   vec[0].iov_base = &log_id;
   vec[0].iov_len = sizeof(log_id);
   uint16_t tid = gettid();
@@ -619,12 +622,17 @@ static void __libc_fatal(const char* format, va_list args) {
   BufferOutputStream os(msg, sizeof(msg));
   out_vformat(os, format, args);
 
-  // TODO: log to stderr for the benefit of "adb shell" users.
+  // log to stderr for the benefit of "adb shell" users.
+  struct iovec iov[2] = {
+    {msg, strlen(msg)},
+    {const_cast<void*>(static_cast<const void*>("\n")), 1},
+  };
+  writev(2, iov, 2);
 
   // Log to the log for the benefit of regular app developers (whose stdout and stderr are closed).
   __libc_write_log(ANDROID_LOG_FATAL, "libc", msg);
 
-  __libc_set_abort_message(msg);
+  android_set_abort_message(msg);
 }
 
 void __libc_fatal_no_abort(const char* format, ...) {
@@ -642,21 +650,33 @@ void __libc_fatal(const char* format, ...) {
   abort();
 }
 
-void __libc_set_abort_message(const char* msg) {
+void android_set_abort_message(const char* msg) {
+  ScopedPthreadMutexLocker locker(&g_abort_msg_lock);
+
+  if (__abort_message_ptr == NULL) {
+    // We must have crashed _very_ early.
+    return;
+  }
+
+  if (*__abort_message_ptr != NULL) {
+    // We already have an abort message.
+    // Assume that the first crash is the one most worth reporting.
+    return;
+  }
+
   size_t size = sizeof(abort_msg_t) + strlen(msg) + 1;
   void* map = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
   if (map == MAP_FAILED) {
     return;
   }
 
-  if (__abort_message_ptr != NULL) {
-    ScopedPthreadMutexLocker locker(&gAbortMsgLock);
-    if (*__abort_message_ptr != NULL) {
-      munmap(*__abort_message_ptr, (*__abort_message_ptr)->size);
-    }
-    abort_msg_t* new_abort_message = reinterpret_cast<abort_msg_t*>(map);
-    new_abort_message->size = size;
-    strcpy(new_abort_message->msg, msg);
-    *__abort_message_ptr = new_abort_message;
+  // TODO: if we stick to the current "one-shot" scheme, we can remove this code and
+  // stop storing the size.
+  if (*__abort_message_ptr != NULL) {
+    munmap(*__abort_message_ptr, (*__abort_message_ptr)->size);
   }
+  abort_msg_t* new_abort_message = reinterpret_cast<abort_msg_t*>(map);
+  new_abort_message->size = size;
+  strcpy(new_abort_message->msg, msg);
+  *__abort_message_ptr = new_abort_message;
 }

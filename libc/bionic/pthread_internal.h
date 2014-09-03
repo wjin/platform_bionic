@@ -30,11 +30,47 @@
 
 #include <pthread.h>
 
+/* Has the thread been detached by a pthread_join or pthread_detach call? */
+#define PTHREAD_ATTR_FLAG_DETACHED 0x00000001
+
+/* Was the thread's stack allocated by the user rather than by us? */
+#define PTHREAD_ATTR_FLAG_USER_ALLOCATED_STACK 0x00000002
+
+/* Has the thread been joined by another thread? */
+#define PTHREAD_ATTR_FLAG_JOINED 0x00000004
+
+/* Is this the main thread? */
+#define PTHREAD_ATTR_FLAG_MAIN_THREAD 0x80000000
+
 struct pthread_internal_t {
   struct pthread_internal_t* next;
   struct pthread_internal_t* prev;
 
   pid_t tid;
+
+ private:
+  pid_t cached_pid_;
+
+ public:
+  pid_t invalidate_cached_pid() {
+    pid_t old_value;
+    get_cached_pid(&old_value);
+    set_cached_pid(0);
+    return old_value;
+  }
+
+  void set_cached_pid(pid_t value) {
+    cached_pid_ = value;
+  }
+
+  bool get_cached_pid(pid_t* cached_pid) {
+    *cached_pid = cached_pid_;
+    return (*cached_pid != 0);
+  }
+
+  bool user_allocated_stack() {
+    return (attr.flags & PTHREAD_ATTR_FLAG_USER_ALLOCATED_STACK) != 0;
+  }
 
   void** tls;
 
@@ -47,6 +83,8 @@ struct pthread_internal_t {
   void* return_value;
 
   void* alternate_signal_stack;
+
+  pthread_mutex_t startup_handshake_mutex;
 
   /*
    * The dynamic linker implements dlerror(3), which makes it hard for us to implement this
@@ -65,20 +103,8 @@ __LIBC_HIDDEN__ pthread_internal_t* __get_thread(void);
 __LIBC_HIDDEN__ void pthread_key_clean_all(void);
 __LIBC_HIDDEN__ void _pthread_internal_remove_locked(pthread_internal_t* thread);
 
-/* Has the thread been detached by a pthread_join or pthread_detach call? */
-#define PTHREAD_ATTR_FLAG_DETACHED 0x00000001
-
-/* Was the thread's stack allocated by the user rather than by us? */
-#define PTHREAD_ATTR_FLAG_USER_ALLOCATED_STACK 0x00000002
-
-/* Has the thread been joined by another thread? */
-#define PTHREAD_ATTR_FLAG_JOINED 0x00000004
-
-/* Is this the main thread? */
-#define PTHREAD_ATTR_FLAG_MAIN_THREAD 0x80000000
-
 /*
- * Traditionally we give threads a 1MiB stack. When we started
+ * Traditionally we gave threads a 1MiB stack. When we started
  * allocating per-thread alternate signal stacks to ease debugging of
  * stack overflows, we subtracted the same amount we were using there
  * from the default thread stack size. This should keep memory usage
@@ -86,8 +112,8 @@ __LIBC_HIDDEN__ void _pthread_internal_remove_locked(pthread_internal_t* thread)
  */
 #define PTHREAD_STACK_SIZE_DEFAULT ((1 * 1024 * 1024) - SIGSTKSZ)
 
-__LIBC_HIDDEN__ extern pthread_internal_t* gThreadList;
-__LIBC_HIDDEN__ extern pthread_mutex_t gThreadListLock;
+__LIBC_HIDDEN__ extern pthread_internal_t* g_thread_list;
+__LIBC_HIDDEN__ extern pthread_mutex_t g_thread_list_lock;
 
 __LIBC_HIDDEN__ int __timespec_from_absolute(timespec*, const timespec*, clockid_t);
 

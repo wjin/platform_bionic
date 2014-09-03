@@ -31,19 +31,26 @@
 
 #include "pthread_internal.h"
 
+#define FORK_FLAGS (CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD)
+
 int fork() {
   __bionic_atfork_run_prepare();
 
   pthread_internal_t* self = __get_thread();
-  int flags = CLONE_CHILD_SETTID | CLONE_CHILD_CLEARTID | SIGCHLD;
+
+  // Remember the parent pid and invalidate the cached value while we fork.
+  pid_t parent_pid = self->invalidate_cached_pid();
+
 #if defined(__x86_64__) // sys_clone's last two arguments are flipped on x86-64.
-  int result = syscall(__NR_clone, flags, NULL, NULL, &(self->tid), NULL);
+  int result = syscall(__NR_clone, FORK_FLAGS, NULL, NULL, &(self->tid), NULL);
 #else
-  int result = syscall(__NR_clone, flags, NULL, NULL, NULL, &(self->tid));
+  int result = syscall(__NR_clone, FORK_FLAGS, NULL, NULL, NULL, &(self->tid));
 #endif
   if (result == 0) {
+    self->set_cached_pid(gettid());
     __bionic_atfork_run_child();
   } else {
+    self->set_cached_pid(parent_pid);
     __bionic_atfork_run_parent();
   }
   return result;

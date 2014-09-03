@@ -60,6 +60,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <arpa/nameser.h>
+#include "NetdClientDispatch.h"
 #include "resolv_netid.h"
 #include "resolv_private.h"
 #include "resolv_cache.h"
@@ -89,7 +90,7 @@
 // This should be synchronized to ResponseCode.h
 static const int DnsProxyQueryResult = 222;
 
-static const char const AskedForGot[] =
+static const char AskedForGot[] =
 			  "gethostby*.getanswer: asked for \"%s\", got \"%s\"";
 
 #define	MAXPACKET	(64*1024)
@@ -538,7 +539,7 @@ static FILE* android_open_proxy()
 	const int one = 1;
 	struct sockaddr_un proxy_addr;
 
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	if (sock < 0) {
 		return NULL;
 	}
@@ -760,6 +761,8 @@ gethostbyname_internal(const char *name, int af, res_state res, unsigned netid, 
 	proxy = android_open_proxy();
 	if (proxy == NULL) goto exit;
 
+	netid = __netdClientDispatch.netIdForResolv(netid);
+
 	/* This is writing to system/netd/DnsProxyListener.cpp and changes
 	 * here need to be matched there */
 	if (fprintf(proxy, "gethostbyname %u %s %d",
@@ -796,6 +799,8 @@ android_gethostbyaddrfornet_proxy(const void *addr,
 	const char * addrStr = inet_ntop(af, addr, buf, sizeof(buf));
 	if (addrStr == NULL) goto exit;
 
+	netid = __netdClientDispatch.netIdForResolv(netid);
+
 	if (fprintf(proxy, "gethostbyaddr %s %d %d %u",
 			addrStr, len, af, netid) < 0) {
 		goto exit;
@@ -828,27 +833,27 @@ android_gethostbyaddrfornet_real(const void *addr,
 
 	assert(addr != NULL);
 
-	if (af == AF_INET6 && len == IN6ADDRSZ &&
-	    (IN6_IS_ADDR_LINKLOCAL((const struct in6_addr *)(const void *)uaddr) ||
-	     IN6_IS_ADDR_SITELOCAL((const struct in6_addr *)(const void *)uaddr))) {
+	if (af == AF_INET6 && len == NS_IN6ADDRSZ &&
+	    (IN6_IS_ADDR_LINKLOCAL((const struct in6_addr *)addr) ||
+	     IN6_IS_ADDR_SITELOCAL((const struct in6_addr *)addr))) {
 		h_errno = HOST_NOT_FOUND;
 		return NULL;
 	}
-	if (af == AF_INET6 && len == IN6ADDRSZ &&
-	    (IN6_IS_ADDR_V4MAPPED((const struct in6_addr *)(const void *)uaddr) ||
-	     IN6_IS_ADDR_V4COMPAT((const struct in6_addr *)(const void *)uaddr))) {
+	if (af == AF_INET6 && len == NS_IN6ADDRSZ &&
+	    (IN6_IS_ADDR_V4MAPPED((const struct in6_addr *)addr) ||
+	     IN6_IS_ADDR_V4COMPAT((const struct in6_addr *)addr))) {
 		/* Unmap. */
-		addr += IN6ADDRSZ - INADDRSZ;
-		uaddr += IN6ADDRSZ - INADDRSZ;
+		uaddr += NS_IN6ADDRSZ - NS_INADDRSZ;
+		addr = uaddr;
 		af = AF_INET;
-		len = INADDRSZ;
+		len = NS_INADDRSZ;
 	}
 	switch (af) {
 	case AF_INET:
-		size = INADDRSZ;
+		size = NS_INADDRSZ;
 		break;
 	case AF_INET6:
-		size = IN6ADDRSZ;
+		size = NS_IN6ADDRSZ;
 		break;
 	default:
 		errno = EAFNOSUPPORT;
@@ -894,7 +899,7 @@ _sethtent(int f)
     res_static  rs = __res_get_static();
     if (rs == NULL) return;
 	if (!rs->hostf)
-		rs->hostf = fopen(_PATH_HOSTS, "r" );
+		rs->hostf = fopen(_PATH_HOSTS, "re" );
 	else
 		rewind(rs->hostf);
 	rs->stayopen = f;
@@ -920,7 +925,7 @@ _gethtent(void)
 	int af, len;
 	res_static  rs = __res_get_static();
 
-	if (!rs->hostf && !(rs->hostf = fopen(_PATH_HOSTS, "r" ))) {
+	if (!rs->hostf && !(rs->hostf = fopen(_PATH_HOSTS, "re" ))) {
 		h_errno = NETDB_INTERNAL;
 		return NULL;
 	}

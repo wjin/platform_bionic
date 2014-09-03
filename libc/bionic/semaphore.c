@@ -28,7 +28,6 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <sys/time.h>
-#include <sys/atomics.h>
 #include <time.h>
 #include <limits.h>
 
@@ -127,11 +126,8 @@ int sem_destroy(sem_t *sem)
 }
 
 
-sem_t *sem_open(const char *name, int oflag, ...)
+sem_t *sem_open(const char *name __unused, int oflag __unused, ...)
 {
-    name=name;
-    oflag=oflag;
-
     errno = ENOSYS;
     return SEM_FAILED;
 }
@@ -148,7 +144,7 @@ int sem_close(sem_t *sem)
 }
 
 
-int sem_unlink(const char * name)
+int sem_unlink(const char* name __unused)
 {
     errno = ENOSYS;
     return -1;
@@ -267,7 +263,6 @@ int sem_wait(sem_t *sem)
 
 int sem_timedwait(sem_t *sem, const struct timespec *abs_timeout)
 {
-    int  ret;
     unsigned int shared;
 
     if (sem == NULL) {

@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(delete_module)
     movl    $__NR_delete_module, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(delete_module)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(delete_module)

@@ -55,9 +55,12 @@ def ExtractCopyrightAt(lines, i):
             break
         if "\tcitrus Id: " in lines[i]:
             break
-        if "\t$OpenBSD: " in lines[i] or " $FreeBSD: " in lines[i] or "\t$NetBSD: " in lines[i]:
+        if "\t$Citrus: " in lines[i] or "\t$OpenBSD: " in lines[i] or " $FreeBSD: " in lines[i] or "\t$NetBSD: " in lines[i]:
             break
         if "$FreeBSD$" in lines[i] or "$Citrus$" in lines[i]:
+            break
+        # OpenBSD likes to say where stuff originally came from:
+        if "Original version ID:" in lines[i]:
             break
         i += 1
 
@@ -74,7 +77,7 @@ def ExtractCopyrightAt(lines, i):
     for line in lines[start:end]:
         line = line.replace("\t", "    ")
         line = line.replace("/* ", "")
-        line = line.replace(" * ", "")
+        line = re.sub("^ \* ", "", line)
         line = line.replace("** ", "")
         line = line.replace("# ", "")
         if line.startswith("++Copyright++"):
@@ -141,7 +144,7 @@ for arg in args:
 
             i = 0
             while i < len(lines):
-                if "Copyright" in lines[i]:
+                if "Copyright" in lines[i] and not "@(#) Copyright" in lines[i]:
                     i = ExtractCopyrightAt(lines, i)
                 i += 1
 

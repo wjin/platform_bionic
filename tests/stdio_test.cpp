@@ -17,11 +17,17 @@
 #include <gtest/gtest.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <wchar.h>
+#include <locale.h>
+
+#include "TemporaryFile.h"
 
 TEST(stdio, tmpfile_fileno_fprintf_rewind_fgets) {
   FILE* fp = tmpfile();
@@ -46,6 +52,24 @@ TEST(stdio, tmpfile_fileno_fprintf_rewind_fgets) {
   ASSERT_STREQ("hello\n", s);
 
   fclose(fp);
+}
+
+TEST(stdio, dprintf) {
+  TemporaryFile tf;
+
+  int rc = dprintf(tf.fd, "hello\n");
+  ASSERT_EQ(rc, 6);
+
+  lseek(tf.fd, SEEK_SET, 0);
+  FILE* tfile = fdopen(tf.fd, "r");
+  ASSERT_TRUE(tfile != NULL);
+
+  char buf[7];
+  ASSERT_EQ(buf, fgets(buf, sizeof(buf), tfile));
+  ASSERT_STREQ("hello\n", buf);
+  // Make sure there isn't anything else in the file.
+  ASSERT_EQ(NULL, fgets(buf, sizeof(buf), tfile));
+  fclose(tfile);
 }
 
 TEST(stdio, getdelim) {
@@ -100,14 +124,12 @@ TEST(stdio, getdelim_invalid) {
   ASSERT_EQ(getdelim(&buffer, NULL, ' ', fp), -1);
   ASSERT_EQ(EINVAL, errno);
 
-  // The stream can't be closed.
-  fclose(fp);
+  // The underlying fd can't be closed.
+  ASSERT_EQ(0, close(fileno(fp)));
   errno = 0;
   ASSERT_EQ(getdelim(&buffer, &buffer_length, ' ', fp), -1);
-  // glibc sometimes doesn't set errno in this particular case.
-#if defined(__BIONIC__)
   ASSERT_EQ(EBADF, errno);
-#endif // __BIONIC__
+  fclose(fp);
 }
 
 TEST(stdio, getline) {
@@ -169,14 +191,12 @@ TEST(stdio, getline_invalid) {
   ASSERT_EQ(getline(&buffer, NULL, fp), -1);
   ASSERT_EQ(EINVAL, errno);
 
-  // The stream can't be closed.
-  fclose(fp);
+  // The underlying fd can't be closed.
+  ASSERT_EQ(0, close(fileno(fp)));
   errno = 0;
   ASSERT_EQ(getline(&buffer, &buffer_length, fp), -1);
-  // glibc sometimes doesn't set errno in this particular case.
-#if defined(__BIONIC__)
   ASSERT_EQ(EBADF, errno);
-#endif // __BIONIC__
+  fclose(fp);
 }
 
 TEST(stdio, printf_ssize_t) {
@@ -191,18 +211,43 @@ TEST(stdio, printf_ssize_t) {
   snprintf(buf, sizeof(buf), "%zd", v);
 }
 
-TEST(stdio, snprintf_n_format_specifier_not_implemented) {
+// https://code.google.com/p/android/issues/detail?id=64886
+TEST(stdio, snprintf_a) {
+  char buf[BUFSIZ];
+  EXPECT_EQ(23, snprintf(buf, sizeof(buf), "<%a>", 9990.235));
+  EXPECT_STREQ("<0x1.3831e147ae148p+13>", buf);
+}
+
+TEST(stdio, snprintf_lc) {
+  char buf[BUFSIZ];
+  wint_t wc = L'a';
+  EXPECT_EQ(3, snprintf(buf, sizeof(buf), "<%lc>", wc));
+  EXPECT_STREQ("<a>", buf);
+}
+
+TEST(stdio, snprintf_ls) {
+  char buf[BUFSIZ];
+  wchar_t* ws = NULL;
+  EXPECT_EQ(8, snprintf(buf, sizeof(buf), "<%ls>", ws));
+  EXPECT_STREQ("<(null)>", buf);
+
+  wchar_t chars[] = { L'h', L'i', 0 };
+  ws = chars;
+  EXPECT_EQ(4, snprintf(buf, sizeof(buf), "<%ls>", ws));
+  EXPECT_STREQ("<hi>", buf);
+}
+
+TEST(stdio, snprintf_n) {
 #if defined(__BIONIC__)
+  // http://b/14492135
   char buf[32];
-  int i = 0;
-  // We deliberately don't implement %n, so it's treated like
-  // any other unrecognized format specifier.
+  int i = 1234;
   EXPECT_EQ(5, snprintf(buf, sizeof(buf), "a %n b", &i));
-  EXPECT_EQ(0, i);
+  EXPECT_EQ(1234, i);
   EXPECT_STREQ("a n b", buf);
-#else // __BIONIC__
+#else
   GTEST_LOG_(INFO) << "This test does nothing.\n";
-#endif // __BIONIC__
+#endif
 }
 
 TEST(stdio, snprintf_smoke) {
@@ -302,6 +347,24 @@ TEST(stdio, snprintf_smoke) {
   EXPECT_STREQ("print_me_twice print_me_twice", buf);
 }
 
+TEST(stdio, snprintf_f_special) {
+  char buf[BUFSIZ];
+  snprintf(buf, sizeof(buf), "%f", nanf(""));
+  EXPECT_STRCASEEQ("NaN", buf);
+
+  snprintf(buf, sizeof(buf), "%f", HUGE_VALF);
+  EXPECT_STRCASEEQ("Inf", buf);
+}
+
+TEST(stdio, snprintf_g_special) {
+  char buf[BUFSIZ];
+  snprintf(buf, sizeof(buf), "%g", nan(""));
+  EXPECT_STRCASEEQ("NaN", buf);
+
+  snprintf(buf, sizeof(buf), "%g", HUGE_VAL);
+  EXPECT_STRCASEEQ("Inf", buf);
+}
+
 TEST(stdio, snprintf_d_INT_MAX) {
   char buf[BUFSIZ];
   snprintf(buf, sizeof(buf), "%d", INT_MAX);
@@ -346,6 +409,70 @@ TEST(stdio, snprintf_lld_LLONG_MIN) {
   EXPECT_STREQ("-9223372036854775808", buf);
 }
 
+TEST(stdio, snprintf_e) {
+  char buf[BUFSIZ];
+
+  snprintf(buf, sizeof(buf), "%e", 1.5);
+  EXPECT_STREQ("1.500000e+00", buf);
+
+  snprintf(buf, sizeof(buf), "%Le", 1.5l);
+  EXPECT_STREQ("1.500000e+00", buf);
+}
+
+TEST(stdio, snprintf_negative_zero_5084292) {
+  char buf[BUFSIZ];
+
+  snprintf(buf, sizeof(buf), "%f", -0.0);
+  EXPECT_STREQ("-0.000000", buf);
+}
+
+TEST(stdio, snprintf_utf8_15439554) {
+  locale_t cloc = newlocale(LC_ALL, "C.UTF-8", 0);
+  locale_t old_locale = uselocale(cloc);
+
+  // http://b/15439554
+  char buf[BUFSIZ];
+
+  // 1-byte character.
+  snprintf(buf, sizeof(buf), "%dx%d", 1, 2);
+  EXPECT_STREQ("1x2", buf);
+  // 2-byte character.
+  snprintf(buf, sizeof(buf), "%d\xc2\xa2%d", 1, 2);
+  EXPECT_STREQ("1¢2", buf);
+  // 3-byte character.
+  snprintf(buf, sizeof(buf), "%d\xe2\x82\xac%d", 1, 2);
+  EXPECT_STREQ("1€2", buf);
+  // 4-byte character.
+  snprintf(buf, sizeof(buf), "%d\xf0\xa4\xad\xa2%d", 1, 2);
+  EXPECT_STREQ("1𤭢2", buf);
+
+  uselocale(old_locale);
+  freelocale(cloc);
+}
+
+TEST(stdio, fprintf_failures_7229520) {
+  // http://b/7229520
+  FILE* fp;
+
+  // Unbuffered case where the fprintf(3) itself fails.
+  ASSERT_NE(nullptr, fp = tmpfile());
+  setbuf(fp, NULL);
+  ASSERT_EQ(4, fprintf(fp, "epic"));
+  ASSERT_EQ(0, close(fileno(fp)));
+  ASSERT_EQ(-1, fprintf(fp, "fail"));
+  ASSERT_EQ(-1, fclose(fp));
+
+  // Buffered case where we won't notice until the fclose(3).
+  // It's likely this is what was actually seen in http://b/7229520,
+  // and that expecting fprintf to fail is setting yourself up for
+  // disappointment. Remember to check fclose(3)'s return value, kids!
+  ASSERT_NE(nullptr, fp = tmpfile());
+  ASSERT_EQ(4, fprintf(fp, "epic"));
+  ASSERT_EQ(0, close(fileno(fp)));
+  ASSERT_EQ(4, fprintf(fp, "fail"));
+  ASSERT_EQ(-1, fclose(fp));
+}
+
 TEST(stdio, popen) {
   FILE* fp = popen("cat /proc/version", "r");
   ASSERT_TRUE(fp != NULL);
@@ -385,4 +512,247 @@ TEST(stdio, sscanf) {
   ASSERT_STREQ("hello", s1);
   ASSERT_EQ(123, i1);
   ASSERT_DOUBLE_EQ(1.23, d1);
+}
+
+TEST(stdio, cantwrite_EBADF) {
+  // If we open a file read-only...
+  FILE* fp = fopen("/proc/version", "r");
+
+  // ...all attempts to write to that file should return failure.
+
+  // They should also set errno to EBADF. This isn't POSIX, but it's traditional.
+  // glibc gets the wide-character functions wrong.
+
+  errno = 0;
+  EXPECT_EQ(EOF, putc('x', fp));
+  EXPECT_EQ(EBADF, errno);
+
+  errno = 0;
+  EXPECT_EQ(EOF, fprintf(fp, "hello"));
+  EXPECT_EQ(EBADF, errno);
+
+  errno = 0;
+  EXPECT_EQ(EOF, fwprintf(fp, L"hello"));
+#if defined(__BIONIC__)
+  EXPECT_EQ(EBADF, errno);
+#endif
+
+  errno = 0;
+  EXPECT_EQ(0U, fwrite("hello", 1, 2, fp));
+  EXPECT_EQ(EBADF, errno);
+
+  errno = 0;
+  EXPECT_EQ(EOF, fputs("hello", fp));
+  EXPECT_EQ(EBADF, errno);
+
+  errno = 0;
+  EXPECT_EQ(WEOF, fputwc(L'x', fp));
+#if defined(__BIONIC__)
+  EXPECT_EQ(EBADF, errno);
+#endif
+}
+
+// Tests that we can only have a consistent and correct fpos_t when using
+// f*pos functions (i.e. fpos doesn't get inside a multi byte character).
+TEST(stdio, consistent_fpos_t) {
+  ASSERT_STREQ("C.UTF-8", setlocale(LC_CTYPE, "C.UTF-8"));
+  uselocale(LC_GLOBAL_LOCALE);
+
+  FILE* fp = tmpfile();
+  ASSERT_TRUE(fp != NULL);
+
+  wchar_t mb_one_bytes = L'h';
+  wchar_t mb_two_bytes = 0x00a2;
+  wchar_t mb_three_bytes = 0x20ac;
+  wchar_t mb_four_bytes = 0x24b62;
+
+  // Write to file.
+  ASSERT_EQ(mb_one_bytes, static_cast<wchar_t>(fputwc(mb_one_bytes, fp)));
+  ASSERT_EQ(mb_two_bytes, static_cast<wchar_t>(fputwc(mb_two_bytes, fp)));
+  ASSERT_EQ(mb_three_bytes, static_cast<wchar_t>(fputwc(mb_three_bytes, fp)));
+  ASSERT_EQ(mb_four_bytes, static_cast<wchar_t>(fputwc(mb_four_bytes, fp)));
+
+  rewind(fp);
+
+  // Record each character position.
+  fpos_t pos1;
+  fpos_t pos2;
+  fpos_t pos3;
+  fpos_t pos4;
+  fpos_t pos5;
+  EXPECT_EQ(0, fgetpos(fp, &pos1));
+  ASSERT_EQ(mb_one_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  EXPECT_EQ(0, fgetpos(fp, &pos2));
+  ASSERT_EQ(mb_two_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  EXPECT_EQ(0, fgetpos(fp, &pos3));
+  ASSERT_EQ(mb_three_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  EXPECT_EQ(0, fgetpos(fp, &pos4));
+  ASSERT_EQ(mb_four_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  EXPECT_EQ(0, fgetpos(fp, &pos5));
+
+#if defined(__BIONIC__)
+  // Bionic's fpos_t is just an alias for off_t. This is inherited from OpenBSD
+  // upstream. Glibc differs by storing the mbstate_t inside its fpos_t. In
+  // Bionic (and upstream OpenBSD) the mbstate_t is stored inside the FILE
+  // structure.
+  ASSERT_EQ(0, static_cast<off_t>(pos1));
+  ASSERT_EQ(1, static_cast<off_t>(pos2));
+  ASSERT_EQ(3, static_cast<off_t>(pos3));
+  ASSERT_EQ(6, static_cast<off_t>(pos4));
+  ASSERT_EQ(10, static_cast<off_t>(pos5));
+#endif
+
+  // Exercise back and forth movements of the position.
+  ASSERT_EQ(0, fsetpos(fp, &pos2));
+  ASSERT_EQ(mb_two_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  ASSERT_EQ(0, fsetpos(fp, &pos1));
+  ASSERT_EQ(mb_one_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  ASSERT_EQ(0, fsetpos(fp, &pos4));
+  ASSERT_EQ(mb_four_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  ASSERT_EQ(0, fsetpos(fp, &pos3));
+  ASSERT_EQ(mb_three_bytes, static_cast<wchar_t>(fgetwc(fp)));
+  ASSERT_EQ(0, fsetpos(fp, &pos5));
+  ASSERT_EQ(WEOF, fgetwc(fp));
+
+  fclose(fp);
+}
+
+// Exercise the interaction between fpos and seek.
+TEST(stdio, fpos_t_and_seek) {
+  ASSERT_STREQ("C.UTF-8", setlocale(LC_CTYPE, "C.UTF-8"));
+  uselocale(LC_GLOBAL_LOCALE);
+
+  // In glibc-2.16 fseek doesn't work properly in wide mode
+  // (https://sourceware.org/bugzilla/show_bug.cgi?id=14543). One workaround is
+  // to close and re-open the file. We do it in order to make the test pass
+  // with all glibcs.
+
+  TemporaryFile tf;
+  FILE* fp = fdopen(tf.fd, "w+");
+  ASSERT_TRUE(fp != NULL);
+
+  wchar_t mb_two_bytes = 0x00a2;
+  wchar_t mb_three_bytes = 0x20ac;
+  wchar_t mb_four_bytes = 0x24b62;
+
+  // Write to file.
+  ASSERT_EQ(mb_two_bytes, static_cast<wchar_t>(fputwc(mb_two_bytes, fp)));
+  ASSERT_EQ(mb_three_bytes, static_cast<wchar_t>(fputwc(mb_three_bytes, fp)));
+  ASSERT_EQ(mb_four_bytes, static_cast<wchar_t>(fputwc(mb_four_bytes, fp)));
+
+  fflush(fp);
+  fclose(fp);
+
+  fp = fopen(tf.filename, "r");
+  ASSERT_TRUE(fp != NULL);
+
+  // Store a valid position.
+  fpos_t mb_two_bytes_pos;
+  ASSERT_EQ(0, fgetpos(fp, &mb_two_bytes_pos));
+
+  // Move inside mb_four_bytes with fseek.
+  long offset_inside_mb = 6;
+  ASSERT_EQ(0, fseek(fp, offset_inside_mb, SEEK_SET));
+
+  // Store the "inside multi byte" position.
+  fpos_t pos_inside_mb;
+  ASSERT_EQ(0, fgetpos(fp, &pos_inside_mb));
+#if defined(__BIONIC__)
+  ASSERT_EQ(offset_inside_mb, static_cast<off_t>(pos_inside_mb));
+#endif
+
+  // Reading from within a byte should produce an error.
+  ASSERT_EQ(WEOF, fgetwc(fp));
+  ASSERT_EQ(EILSEQ, errno);
+
+  // Reverting to a valid position should work.
+  ASSERT_EQ(0, fsetpos(fp, &mb_two_bytes_pos));
+  ASSERT_EQ(mb_two_bytes, static_cast<wchar_t>(fgetwc(fp)));
+
+  // Moving withing a multi byte with fsetpos should work but reading should
+  // produce an error.
+  ASSERT_EQ(0, fsetpos(fp, &pos_inside_mb));
+  ASSERT_EQ(WEOF, fgetwc(fp));
+  ASSERT_EQ(EILSEQ, errno);
+
+  fclose(fp);
+}
+
+TEST(stdio, fmemopen) {
+  char buf[16];
+  memset(buf, 0, sizeof(buf));
+  FILE* fp = fmemopen(buf, sizeof(buf), "r+");
+  ASSERT_EQ('<', fputc('<', fp));
+  ASSERT_NE(EOF, fputs("abc>\n", fp));
+  fflush(fp);
+
+  ASSERT_STREQ("<abc>\n", buf);
+
+  rewind(fp);
+
+  char line[16];
+  char* s = fgets(line, sizeof(line), fp);
+  ASSERT_TRUE(s != NULL);
+  ASSERT_STREQ("<abc>\n", s);
+
+  fclose(fp);
+}
+
+TEST(stdio, fmemopen_NULL) {
+  FILE* fp = fmemopen(nullptr, 128, "r+");
+  ASSERT_NE(EOF, fputs("xyz\n", fp));
+
+  rewind(fp);
+
+  char line[16];
+  char* s = fgets(line, sizeof(line), fp);
+  ASSERT_TRUE(s != NULL);
+  ASSERT_STREQ("xyz\n", s);
+
+  fclose(fp);
+}
+
+TEST(stdio, fmemopen_EINVAL) {
+  char buf[16];
+
+  // Invalid size.
+  errno = 0;
+  ASSERT_EQ(nullptr, fmemopen(buf, 0, "r+"));
+  ASSERT_EQ(EINVAL, errno);
+
+  // No '+' with NULL buffer.
+  errno = 0;
+  ASSERT_EQ(nullptr, fmemopen(nullptr, 0, "r"));
+  ASSERT_EQ(EINVAL, errno);
+}
+
+TEST(stdio, open_memstream) {
+  char* p = nullptr;
+  size_t size = 0;
+  FILE* fp = open_memstream(&p, &size);
+  ASSERT_NE(EOF, fputs("hello, world!", fp));
+  fclose(fp);
+
+  ASSERT_STREQ("hello, world!", p);
+  ASSERT_EQ(strlen("hello, world!"), size);
+  free(p);
+}
+
+TEST(stdio, open_memstream_EINVAL) {
+#if defined(__BIONIC__)
+  char* p;
+  size_t size;
+
+  // Invalid buffer.
+  errno = 0;
+  ASSERT_EQ(nullptr, open_memstream(nullptr, &size));
+  ASSERT_EQ(EINVAL, errno);
+
+  // Invalid size.
+  errno = 0;
+  ASSERT_EQ(nullptr, open_memstream(&p, nullptr));
+  ASSERT_EQ(EINVAL, errno);
+#else
+  GTEST_LOG_(INFO) << "This test does nothing.\n";
+#endif
 }

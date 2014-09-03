@@ -92,6 +92,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <netdb.h>
+#include "NetdClientDispatch.h"
 #include "resolv_cache.h"
 #include "resolv_netid.h"
 #include "resolv_private.h"
@@ -361,7 +362,7 @@ str2number(const char *p)
  */
 static int
 _test_connect(int pf, struct sockaddr *addr, size_t addrlen, unsigned mark) {
-	int s = socket(pf, SOCK_DGRAM, IPPROTO_UDP);
+	int s = socket(pf, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
 	if (s < 0)
 		return 0;
 	if (mark != MARK_UNSET && setsockopt(s, SOL_SOCKET, SO_MARK, &mark, sizeof(mark)) < 0)
@@ -432,7 +433,7 @@ android_getaddrinfo_proxy(
 		return EAI_NODATA;
 	}
 
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 	if (sock < 0) {
 		return EAI_NODATA;
 	}
@@ -448,6 +449,8 @@ android_getaddrinfo_proxy(
 		close(sock);
 		return EAI_NODATA;
 	}
+
+	netid = __netdClientDispatch.netIdForResolv(netid);
 
 	// Send the request.
 	proxy = fdopen(sock, "r+");
@@ -881,7 +884,7 @@ explore_null(const struct addrinfo *pai, const char *servname,
 	 * filter out AFs that are not supported by the kernel
 	 * XXX errno?
 	 */
-	s = socket(pai->ai_family, SOCK_DGRAM, 0);
+	s = socket(pai->ai_family, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 	if (s < 0) {
 		if (errno != EMFILE)
 			return 0;
@@ -1789,7 +1792,7 @@ _find_src_addr(const struct sockaddr *addr, struct sockaddr *src_addr, unsigned 
 		return 0;
 	}
 
-	sock = socket(addr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+	sock = socket(addr->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
 	if (sock == -1) {
 		if (errno == EAFNOSUPPORT) {
 			return 0;
@@ -2014,7 +2017,7 @@ _sethtent(FILE **hostf)
 {
 
 	if (!*hostf)
-		*hostf = fopen(_PATH_HOSTS, "r" );
+		*hostf = fopen(_PATH_HOSTS, "re");
 	else
 		rewind(*hostf);
 }
@@ -2043,7 +2046,7 @@ _gethtent(FILE **hostf, const char *name, const struct addrinfo *pai)
 	assert(name != NULL);
 	assert(pai != NULL);
 
-	if (!*hostf && !(*hostf = fopen(_PATH_HOSTS, "r" )))
+	if (!*hostf && !(*hostf = fopen(_PATH_HOSTS, "re")))
 		return (NULL);
  again:
 	if (!(p = fgets(hostbuf, sizeof hostbuf, *hostf)))

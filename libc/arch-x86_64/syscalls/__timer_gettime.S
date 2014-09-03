@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(__timer_gettime)
     movl    $__NR_timer_gettime, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(__timer_gettime)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(__timer_gettime)

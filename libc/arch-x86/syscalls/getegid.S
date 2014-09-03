@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(getegid)
     movl    $__NR_getegid32, %eax
     int     $0x80
@@ -11,7 +13,6 @@ ENTRY(getegid)
     pushl   %eax
     call    __set_errno
     addl    $4, %esp
-    orl     $-1, %eax
 1:
     ret
 END(getegid)

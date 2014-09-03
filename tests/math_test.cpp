@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-#define _DECLARE_C99_LDBL_MATH 1
-
 // This include (and the associated definition of __test_capture_signbit)
 // must be placed before any files that include <cmath> (gtest.h in this case).
 //
@@ -239,6 +237,12 @@ TEST(math, finite) {
   ASSERT_FALSE(finite(HUGE_VAL));
 }
 
+TEST(math, isinf_function) {
+  // The isinf macro deals with all three types; the isinf function is for doubles.
+  ASSERT_FALSE((isinf)(123.0));
+  ASSERT_TRUE((isinf)(HUGE_VAL));
+}
+
 TEST(math, __isinff) {
   ASSERT_FALSE(__isinff(123.0f));
   ASSERT_TRUE(__isinff(HUGE_VALF));
@@ -247,6 +251,12 @@ TEST(math, __isinff) {
 TEST(math, __isinfl) {
   ASSERT_FALSE(__isinfl(123.0L));
   ASSERT_TRUE(__isinfl(HUGE_VALL));
+}
+
+TEST(math, isnan_function) {
+  // The isnan macro deals with all three types; the isnan function is for doubles.
+  ASSERT_FALSE((isnan)(123.0));
+  ASSERT_TRUE((isnan)(nan("")));
 }
 
 TEST(math, __isnanf) {
@@ -1003,9 +1013,26 @@ TEST(math, nextafterl) {
   ASSERT_DOUBLE_EQ(0.0L, nextafterl(0.0L, -1.0L));
 }
 
-// TODO: nexttoward
-// TODO: nexttowardf
-// TODO: nexttowardl
+TEST(math, nexttoward) {
+  ASSERT_DOUBLE_EQ(0.0, nexttoward(0.0, 0.0L));
+  ASSERT_DOUBLE_EQ(4.9406564584124654e-324, nexttoward(0.0, 1.0L));
+  ASSERT_DOUBLE_EQ(0.0, nexttoward(0.0, -1.0L));
+}
+
+TEST(math, nexttowardf) {
+  ASSERT_FLOAT_EQ(0.0f, nexttowardf(0.0f, 0.0L));
+  ASSERT_FLOAT_EQ(1.4012985e-45f, nexttowardf(0.0f, 1.0L));
+  ASSERT_FLOAT_EQ(0.0f, nexttowardf(0.0f, -1.0L));
+}
+
+TEST(math, nexttowardl) {
+  ASSERT_DOUBLE_EQ(0.0L, nexttowardl(0.0L, 0.0L));
+  // Use a runtime value to accomodate the case when
+  // sizeof(double) == sizeof(long double)
+  long double smallest_positive = ldexpl(1.0L, LDBL_MIN_EXP - LDBL_MANT_DIG);
+  ASSERT_DOUBLE_EQ(smallest_positive, nexttowardl(0.0L, 1.0L));
+  ASSERT_DOUBLE_EQ(0.0L, nexttowardl(0.0L, -1.0L));
+}
 
 TEST(math, copysign) {
   ASSERT_DOUBLE_EQ(0.0, copysign(0.0, 1.0));
@@ -1039,8 +1066,6 @@ TEST(math, significandf) {
   ASSERT_FLOAT_EQ(1.2f, significandf(1.2f));
   ASSERT_FLOAT_EQ(1.5375f, significandf(12.3f));
 }
-
-extern "C" long double significandl(long double); // BSD's <math.h> doesn't declare this.
 
 TEST(math, significandl) {
   ASSERT_DOUBLE_EQ(0.0L, significandl(0.0L));
@@ -1269,4 +1294,19 @@ TEST(math, frexpf_public_bug_6697) {
   int exp;
   float fr = frexpf(14.1f, &exp);
   ASSERT_FLOAT_EQ(14.1f, scalbnf(fr, exp));
+}
+
+TEST(math, exp2_STRICT_ALIGN_OpenBSD_bug) {
+  // OpenBSD/x86's libm had a bug here, but it was already fixed in FreeBSD:
+  // http://svnweb.FreeBSD.org/base/head/lib/msun/src/math_private.h?revision=240827&view=markup
+  ASSERT_DOUBLE_EQ(5.0, exp2(log2(5)));
+  ASSERT_FLOAT_EQ(5.0f, exp2f(log2f(5)));
+  ASSERT_DOUBLE_EQ(5.0L, exp2l(log2l(5)));
+}
+
+TEST(math, nextafterl_OpenBSD_bug) {
+  // OpenBSD/x86's libm had a bug here.
+  ASSERT_TRUE(nextafter(1.0, 0.0) - 1.0 < 0.0);
+  ASSERT_TRUE(nextafterf(1.0f, 0.0f) - 1.0f < 0.0f);
+  ASSERT_TRUE(nextafterl(1.0L, 0.0L) - 1.0L < 0.0L);
 }

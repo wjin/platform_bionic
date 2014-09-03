@@ -2,12 +2,15 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(__getcwd)
     pushl   %ebx
-    pushl   %ecx
     .cfi_def_cfa_offset 8
     .cfi_rel_offset ebx, 0
-    .cfi_rel_offset ecx, 4
+    pushl   %ecx
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset ecx, 0
     mov     12(%esp), %ebx
     mov     16(%esp), %ecx
     movl    $__NR_getcwd, %eax
@@ -18,7 +21,6 @@ ENTRY(__getcwd)
     pushl   %eax
     call    __set_errno
     addl    $4, %esp
-    orl     $-1, %eax
 1:
     popl    %ecx
     popl    %ebx

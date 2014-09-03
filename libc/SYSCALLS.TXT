@@ -38,7 +38,6 @@ uid_t   getresuid:getresuid32(uid_t* ruid, uid_t* euid, uid_t* suid)   arm,x86
 uid_t   getresuid:getresuid(uid_t* ruid, uid_t* euid, uid_t* suid)     arm64,mips,mips64,x86_64
 gid_t   getresgid:getresgid32(gid_t* rgid, gid_t* egid, gid_t* sgid)   arm,x86
 gid_t   getresgid:getresgid(gid_t* rgid, gid_t* egid, gid_t* sgid)     arm64,mips,mips64,x86_64
-pid_t   gettid()                   all
 ssize_t readahead(int, off64_t, size_t)     all
 int     getgroups:getgroups32(int, gid_t*)    arm,x86
 int     getgroups:getgroups(int, gid_t*)      arm64,mips,mips64,x86_64
@@ -58,10 +57,8 @@ int     setresgid:setresgid32(gid_t, gid_t, gid_t)   arm,x86
 int     setresgid:setresgid(gid_t, gid_t, gid_t)     arm64,mips,mips64,x86_64
 void*   __brk:brk(void*)           all
 int     kill(pid_t, int)           all
-int     tkill(pid_t tid, int sig)  all
 int     tgkill(pid_t tgid, pid_t tid, int sig)  all
 int     __ptrace:ptrace(int request, int pid, void* addr, void* data)  all
-int     __set_thread_area:set_thread_area(void*  user_desc)  mips,mips64,x86
 
 # <sys/resource.h>
 int getrusage(int, struct rusage*)  all
@@ -84,9 +81,7 @@ pid_t   vfork(void)  arm
 int     setregid:setregid32(gid_t, gid_t)  arm,x86
 int     setregid:setregid(gid_t, gid_t)    arm64,mips,mips64,x86_64
 int     chroot(const char*)  all
-# IMPORTANT: Even though <sys/prctl.h> declares prctl(int, ...), the syscall stub must take 6 arguments
-#            to match the kernel implementation.
-int     prctl(int option, unsigned int arg2, unsigned int arg3, unsigned int arg4, unsigned int arg5) all
+int     prctl(int, unsigned long, unsigned long, unsigned long, unsigned long) all
 long    __arch_prctl:arch_prctl(int, unsigned long) x86_64
 int     capget(cap_user_header_t header, cap_user_data_t data) all
 int     capset(cap_user_header_t header, const cap_user_data_t data) all
@@ -101,7 +96,7 @@ ssize_t     pread64|pread(int, void*, size_t, off_t) arm64,mips64,x86_64
 ssize_t     pwrite64(int, void*, size_t, off64_t) arm,mips,x86
 ssize_t     pwrite64|pwrite(int, void*, size_t, off_t) arm64,mips64,x86_64
 int         close(int)                      all
-pid_t       getpid()    all
+pid_t       __getpid:getpid()  all
 int         munmap(void*, size_t)  all
 void*       mremap(void*, size_t, size_t, unsigned long)  all
 int         msync(const void*, size_t, int)    all
@@ -132,12 +127,7 @@ ssize_t     fgetxattr(int, const char*, void*, size_t) all
 ssize_t     flistxattr(int, char*, size_t) all
 int         fremovexattr(int, const char*) all
 
-# mips64 doesn't have getdents64 until 3.10 kernels.
-# We need this special-case hack as long as we need to support mips64 on older kernels.
-# The currently-available Debian qemu image is on a 3.2 kernel.
-int getdents:getdents64(unsigned int, struct dirent*, unsigned int)   arm,arm64,mips,x86,x86_64
-int __getdents64:getdents64(unsigned int, struct dirent*, unsigned int)   mips64
-int __getdents:getdents(unsigned int, void*, unsigned int)   mips64
+int __getdents64:getdents64(unsigned int, struct dirent*, unsigned int)   arm,arm64,mips,mips64,x86,x86_64
 
 int __openat:openat(int, const char*, int, mode_t) all
 int faccessat(int, const char*, int, int)  all
@@ -203,11 +193,9 @@ int     swapon(const char*, int) all
 int     swapoff(const char*) all
 
 # time
-int           gettimeofday(struct timeval*, struct timezone*)       all
 int           settimeofday(const struct timeval*, const struct timezone*)   all
 clock_t       times(struct tms*)       all
 int           nanosleep(const struct timespec*, struct timespec*)   all
-int           clock_gettime(clockid_t clk_id, struct timespec* tp)    all
 int           clock_settime(clockid_t clk_id, const struct timespec* tp)  all
 int           clock_getres(clockid_t clk_id, struct timespec* res)   all
 int           clock_nanosleep(clockid_t clock_id, int flags, const struct timespec* req, struct timespec* rem)  all
@@ -229,16 +217,15 @@ int     __rt_sigpending:rt_sigpending(sigset_t*, size_t)  all
 int     __rt_sigprocmask:rt_sigprocmask(int, const sigset_t*, sigset_t*, size_t)  all
 int     __rt_sigsuspend:rt_sigsuspend(const sigset_t*, size_t)  all
 int     __rt_sigtimedwait:rt_sigtimedwait(const sigset_t*, struct siginfo_t*, struct timespec_t*, size_t)  all
-int     signalfd4(int, const sigset_t*, size_t, int)  all
+int     __signalfd4:signalfd4(int, const sigset_t*, size_t, int)  all
 
 # sockets
-int           socket(int, int, int)              arm,arm64,mips,mips64,x86_64
+int           __socket:socket(int, int, int)              arm,arm64,mips,mips64,x86_64
 int           socketpair(int, int, int, int*)    arm,arm64,mips,mips64,x86_64
 int           bind(int, struct sockaddr*, int)  arm,arm64,mips,mips64,x86_64
-int           connect(int, struct sockaddr*, socklen_t)   arm,arm64,mips,mips64,x86_64
+int           __connect:connect(int, struct sockaddr*, socklen_t)   arm,arm64,mips,mips64,x86_64
 int           listen(int, int)                   arm,arm64,mips,mips64,x86_64
-int           accept(int, struct sockaddr*, socklen_t*)  arm,arm64,mips,mips64,x86_64
-int           accept4(int, struct sockaddr*, socklen_t*, int)  arm,arm64,mips,mips64,x86_64
+int           __accept4:accept4(int, struct sockaddr*, socklen_t*, int)  arm,arm64,mips,mips64,x86_64
 int           getsockname(int, struct sockaddr*, socklen_t*)  arm,arm64,mips,mips64,x86_64
 int           getpeername(int, struct sockaddr*, socklen_t*)  arm,arm64,mips,mips64,x86_64
 int           sendto(int, const void*, size_t, int, const struct sockaddr*, socklen_t)  arm,arm64,mips,mips64,x86_64
@@ -252,11 +239,10 @@ int           recvmmsg(int, struct mmsghdr*, unsigned int, int, const struct tim
 int           sendmmsg(int, struct mmsghdr*, unsigned int, int)   arm,arm64,mips,mips64,x86_64
 
 # sockets for x86. These are done as an "indexed" call to socketcall syscall.
-int           socket:socketcall:1(int, int, int) x86
+int           __socket:socketcall:1(int, int, int) x86
 int           bind:socketcall:2(int, struct sockaddr*, int)  x86
-int           connect:socketcall:3(int, struct sockaddr*, socklen_t)   x86
+int           __connect:socketcall:3(int, struct sockaddr*, socklen_t)   x86
 int           listen:socketcall:4(int, int)                   x86
-int           accept:socketcall:5(int, struct sockaddr*, socklen_t*)  x86
 int           getsockname:socketcall:6(int, struct sockaddr*, socklen_t*)  x86
 int           getpeername:socketcall:7(int, struct sockaddr*, socklen_t*)  x86
 int           socketpair:socketcall:8(int, int, int, int*)    x86
@@ -267,7 +253,7 @@ int           setsockopt:socketcall:14(int, int, int, const void*, socklen_t)  x
 int           getsockopt:socketcall:15(int, int, int, void*, socklen_t*)    x86
 int           sendmsg:socketcall:16(int, const struct msghdr*, unsigned int)  x86
 int           recvmsg:socketcall:17(int, struct msghdr*, unsigned int)   x86
-int           accept4:socketcall:18(int, struct sockaddr*, socklen_t*, int)  x86
+int           __accept4:socketcall:18(int, struct sockaddr*, socklen_t*, int)  x86
 int           recvmmsg:socketcall:19(int, struct mmsghdr*, unsigned int, int, const struct timespec*)   x86
 int           sendmmsg:socketcall:20(int, struct mmsghdr*, unsigned int, int)   x86
 
@@ -286,21 +272,19 @@ int unshare(int) all
 int __sched_getaffinity:sched_getaffinity(pid_t pid, size_t setsize, cpu_set_t* set)  all
 int __getcpu:getcpu(unsigned*, unsigned*, void*) all
 
-# io priorities
-int ioprio_set(int which, int who, int ioprio) all
-int ioprio_get(int which, int who) all
-
 # other
 int     uname(struct utsname*)  all
 mode_t  umask(mode_t)  all
 int     __reboot:reboot(int, int, int, void*)  all
-int     __syslog:syslog(int, char*, int)  all
 int     init_module(void*, unsigned long, const char*)  all
 int     delete_module(const char*, unsigned int)   all
 int     klogctl:syslog(int, char*, int)   all
 int     sysinfo(struct sysinfo*)  all
 int     personality(unsigned long)  all
-long    perf_event_open(struct perf_event_attr* attr_uptr, pid_t pid, int cpu, int group_fd, unsigned long flags) all
+
+ssize_t tee(int, int, size_t, unsigned int)  all
+ssize_t splice(int, off64_t*, int, off64_t*, size_t, unsigned int)  all
+ssize_t vmsplice(int, const struct iovec*, size_t, unsigned int)  all
 
 int epoll_create1(int)  all
 int epoll_ctl(int, int op, int, struct epoll_event*)  all
@@ -311,8 +295,6 @@ int eventfd:eventfd2(unsigned int, int)  all
 void _exit|_Exit:exit_group(int)  all
 void __exit:exit(int)  all
 
-int futex(void*, int, int, void*, void*, int)  all
-
 int inotify_init1(int)  all
 int inotify_add_watch(int, const char*, unsigned int)  all
 int inotify_rm_watch(int, unsigned int)  all
@@ -322,6 +304,9 @@ int __ppoll:ppoll(pollfd*, unsigned int, timespec*, const sigset_t*, size_t)  al
 
 int __set_tid_address:set_tid_address(int*)  all
 
+int setfsgid(gid_t)  all
+int setfsuid(uid_t)  all
+
 pid_t wait4(pid_t, int*, int, struct rusage*)  all
 int __waitid:waitid(int, pid_t, struct siginfo_t*, int, void*)  all
 
@@ -330,4 +315,14 @@ int     __set_tls:__ARM_NR_set_tls(void*)                                 arm
 int     cacheflush:__ARM_NR_cacheflush(long start, long end, long flags)  arm
 
 # MIPS-specific
-int     _flush_cache:cacheflush(char* addr, const int nbytes, const int op) mips,mips64
+int     _flush_cache:cacheflush(char* addr, const int nbytes, const int op) mips
+int     __set_tls:set_thread_area(void*) mips,mips64
+
+# x86-specific
+int     __set_thread_area:set_thread_area(void*) x86
+
+# vdso stuff.
+int clock_gettime(clockid_t, timespec*)                 arm,mips,mips64,x86
+int __clock_gettime:clock_gettime(clockid_t, timespec*) arm64,x86_64
+int gettimeofday(timeval*, timezone*)                   arm,mips,mips64,x86
+int __gettimeofday:gettimeofday(timeval*, timezone*)    arm64,x86_64

@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(statfs64)
     movl    $__NR_statfs, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(statfs64)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(statfs64)

@@ -54,11 +54,14 @@ ENTRY(__bionic_clone)
         j ra
 
 .L__thread_start_bc:
+        # Clear return address in child so we don't unwind further.
+        li      ra,0
+
         lw	a0,0(sp)	#  fn
         lw	a1,4(sp)	#  arg
 
-	# void __bionic_clone_entry(int (*func)(void*), void *arg)
-        la	t9,__bionic_clone_entry
+	# void __start_thread(int (*func)(void*), void *arg)
+        la	t9,__start_thread
         j	t9
 
 .L__error_bc:
@@ -66,3 +69,4 @@ ENTRY(__bionic_clone)
 	la	t9,__set_errno
 	j	t9
 END(__bionic_clone)
+.hidden __bionic_clone

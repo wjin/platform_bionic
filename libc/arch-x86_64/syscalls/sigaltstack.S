@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(sigaltstack)
     movl    $__NR_sigaltstack, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(sigaltstack)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(sigaltstack)

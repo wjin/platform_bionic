@@ -42,9 +42,13 @@ kernel_remove_config_macros = True
 # maps an architecture to a set of default macros that would be provided by
 # toolchain preprocessor
 kernel_default_arch_macros = {
-    "arm": {},
+    "arm": {"__ARMEB__": kCppUndefinedMacro, "__ARM_EABI__": "1"},
     "arm64": {},
-    "mips": {"CONFIG_32BIT":"1"},
+    "mips": {"__MIPSEB__": kCppUndefinedMacro,
+             "__MIPSEL__": "1",
+             "CONFIG_32BIT": "_ABIO32",
+             "CONFIG_CPU_LITTLE_ENDIAN": "1",
+             "__SANE_USERSPACE_TYPES__": "1",},
     "x86": {},
     }
 
@@ -63,6 +67,9 @@ kernel_token_replacements = {
     # The kernel's _NSIG/NSIG are one less than the userspace value, so we need to move them aside.
     "_NSIG": "_KERNEL__NSIG",
     "NSIG": "_KERNEL_NSIG",
+    # The kernel's SIGRTMIN/SIGRTMAX are absolute limits; userspace steals a few.
+    "SIGRTMIN": "__SIGRTMIN",
+    "SIGRTMAX": "__SIGRTMAX",
     }
 
 # this is the set of known static inline functions that we want to keep

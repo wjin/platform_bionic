@@ -19,12 +19,7 @@
 #ifndef _UAPI__ASM_ARM_UNISTD_H
 #define _UAPI__ASM_ARM_UNISTD_H
 #define __NR_OABI_SYSCALL_BASE 0x900000
-#if defined(__thumb__) || defined(__ARM_EABI__)
-/* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
 #define __NR_SYSCALL_BASE 0
-#else
-#define __NR_SYSCALL_BASE __NR_OABI_SYSCALL_BASE
-#endif
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
 #define __NR_restart_syscall (__NR_SYSCALL_BASE+ 0)
 #define __NR_exit (__NR_SYSCALL_BASE+ 1)
@@ -461,29 +456,29 @@
 #define __NR_kcmp (__NR_SYSCALL_BASE+378)
 #define __NR_finit_module (__NR_SYSCALL_BASE+379)
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
+#define __NR_sched_setattr (__NR_SYSCALL_BASE+380)
+#define __NR_sched_getattr (__NR_SYSCALL_BASE+381)
 #define __ARM_NR_BASE (__NR_SYSCALL_BASE+0x0f0000)
 #define __ARM_NR_breakpoint (__ARM_NR_BASE+1)
+/* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
 #define __ARM_NR_cacheflush (__ARM_NR_BASE+2)
 #define __ARM_NR_usr26 (__ARM_NR_BASE+3)
-/* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
 #define __ARM_NR_usr32 (__ARM_NR_BASE+4)
 #define __ARM_NR_set_tls (__ARM_NR_BASE+5)
-#ifdef __ARM_EABI__
-#undef __NR_time
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
+#undef __NR_time
 #undef __NR_umount
 #undef __NR_stime
 #undef __NR_alarm
-#undef __NR_utime
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
+#undef __NR_utime
 #undef __NR_getrlimit
 #undef __NR_select
 #undef __NR_readdir
-#undef __NR_mmap
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
+#undef __NR_mmap
 #undef __NR_socketcall
 #undef __NR_syscall
 #undef __NR_ipc
-#endif
 /* WARNING: DO NOT EDIT, AUTO-GENERATED CODE - SEE TOP FOR INSTRUCTIONS */
 #endif

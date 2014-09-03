@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(fchdir)
     movl    $__NR_fchdir, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(fchdir)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(fchdir)

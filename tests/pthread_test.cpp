@@ -23,6 +23,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -67,6 +68,72 @@ TEST(pthread, pthread_key_create_lots) {
 #else // __BIONIC__
   GTEST_LOG_(INFO) << "This test does nothing.\n";
 #endif // __BIONIC__
+}
+
+TEST(pthread, pthread_key_delete) {
+  void* expected = reinterpret_cast<void*>(1234);
+  pthread_key_t key;
+  ASSERT_EQ(0, pthread_key_create(&key, NULL));
+  ASSERT_EQ(0, pthread_setspecific(key, expected));
+  ASSERT_EQ(expected, pthread_getspecific(key));
+  ASSERT_EQ(0, pthread_key_delete(key));
+  // After deletion, pthread_getspecific returns NULL.
+  ASSERT_EQ(NULL, pthread_getspecific(key));
+  // And you can't use pthread_setspecific with the deleted key.
+  ASSERT_EQ(EINVAL, pthread_setspecific(key, expected));
+}
+
+TEST(pthread, pthread_key_fork) {
+  void* expected = reinterpret_cast<void*>(1234);
+  pthread_key_t key;
+  ASSERT_EQ(0, pthread_key_create(&key, NULL));
+  ASSERT_EQ(0, pthread_setspecific(key, expected));
+  ASSERT_EQ(expected, pthread_getspecific(key));
+
+  pid_t pid = fork();
+  ASSERT_NE(-1, pid) << strerror(errno);
+
+  if (pid == 0) {
+    // The surviving thread inherits all the forking thread's TLS values...
+    ASSERT_EQ(expected, pthread_getspecific(key));
+    _exit(99);
+  }
+
+  int status;
+  ASSERT_EQ(pid, waitpid(pid, &status, 0));
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(99, WEXITSTATUS(status));
+
+  ASSERT_EQ(expected, pthread_getspecific(key));
+  ASSERT_EQ(0, pthread_key_delete(key));
+}
+
+static void* DirtyKeyFn(void* key) {
+  return pthread_getspecific(*reinterpret_cast<pthread_key_t*>(key));
+}
+
+TEST(pthread, pthread_key_dirty) {
+  pthread_key_t key;
+  ASSERT_EQ(0, pthread_key_create(&key, NULL));
+
+  size_t stack_size = 128 * 1024;
+  void* stack = mmap(NULL, stack_size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(MAP_FAILED, stack);
+  memset(stack, 0xff, stack_size);
+
+  pthread_attr_t attr;
+  ASSERT_EQ(0, pthread_attr_init(&attr));
+  ASSERT_EQ(0, pthread_attr_setstack(&attr, stack, stack_size));
+
+  pthread_t t;
+  ASSERT_EQ(0, pthread_create(&t, &attr, DirtyKeyFn, &key));
+
+  void* result;
+  ASSERT_EQ(0, pthread_join(t, &result));
+  ASSERT_EQ(nullptr, result); // Not ~0!
+
+  ASSERT_EQ(0, munmap(stack, stack_size));
+  ASSERT_EQ(0, pthread_key_delete(key));
 }
 
 static void* IdFn(void* arg) {
@@ -256,22 +323,6 @@ TEST(pthread, pthread_sigmask) {
   ASSERT_EQ(0, pthread_sigmask(SIG_SETMASK, &original_set, NULL));
 }
 
-#if defined(__BIONIC__)
-extern "C" pid_t __bionic_clone(int flags, void* child_stack, pid_t* parent_tid, void* tls, pid_t* child_tid, int (*fn)(void*), void* arg);
-#endif // __BIONIC__
-
-TEST(pthread, __bionic_clone) {
-#if defined(__BIONIC__)
-  // Check that our hand-written clone assembler sets errno correctly on failure.
-  uintptr_t fake_child_stack[16];
-  errno = 0;
-  ASSERT_EQ(-1, __bionic_clone(CLONE_THREAD, &fake_child_stack[16], NULL, NULL, NULL, NULL, NULL));
-  ASSERT_EQ(EINVAL, errno);
-#else // __BIONIC__
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
-#endif // __BIONIC__
-}
-
 TEST(pthread, pthread_setname_np__too_long) {
 #if defined(__BIONIC__) // Not all build servers have a new enough glibc? TODO: remove when they're on gprecise.
   ASSERT_EQ(ERANGE, pthread_setname_np(pthread_self(), "this name is far too long for linux"));
@@ -352,27 +403,36 @@ TEST(pthread, pthread_detach__no_such_thread) {
 }
 
 TEST(pthread, pthread_detach__leak) {
-  size_t initial_bytes = mallinfo().uordblks;
+  size_t initial_bytes = 0;
+  // Run this loop more than once since the first loop causes some memory
+  // to be allocated permenantly. Run an extra loop to help catch any subtle
+  // memory leaks.
+  for (size_t loop = 0; loop < 3; loop++) {
+    // Set the initial bytes on the second loop since the memory in use
+    // should have stabilized.
+    if (loop == 1) {
+      initial_bytes = mallinfo().uordblks;
+    }
 
-  pthread_attr_t attr;
-  ASSERT_EQ(0, pthread_attr_init(&attr));
-  ASSERT_EQ(0, pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE));
+    pthread_attr_t attr;
+    ASSERT_EQ(0, pthread_attr_init(&attr));
+    ASSERT_EQ(0, pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE));
 
-  std::vector<pthread_t> threads;
-  for (size_t i = 0; i < 32; ++i) {
-    pthread_t t;
-    ASSERT_EQ(0, pthread_create(&t, &attr, IdFn, NULL));
-    threads.push_back(t);
-  }
+    std::vector<pthread_t> threads;
+    for (size_t i = 0; i < 32; ++i) {
+      pthread_t t;
+      ASSERT_EQ(0, pthread_create(&t, &attr, IdFn, NULL));
+      threads.push_back(t);
+    }
 
-  sleep(1);
+    sleep(1);
 
-  for (size_t i = 0; i < 32; ++i) {
-    ASSERT_EQ(0, pthread_detach(threads[i])) << i;
+    for (size_t i = 0; i < 32; ++i) {
+      ASSERT_EQ(0, pthread_detach(threads[i])) << i;
+    }
   }
 
   size_t final_bytes = mallinfo().uordblks;
-
   int leaked_bytes = (final_bytes - initial_bytes);
 
   // User code (like this test) doesn't know how large pthread_internal_t is.
@@ -567,36 +627,93 @@ TEST(pthread, pthread_rwlock_smoke) {
   pthread_rwlock_t l;
   ASSERT_EQ(0, pthread_rwlock_init(&l, NULL));
 
+  // Single read lock
   ASSERT_EQ(0, pthread_rwlock_rdlock(&l));
   ASSERT_EQ(0, pthread_rwlock_unlock(&l));
 
+  // Multiple read lock
+  ASSERT_EQ(0, pthread_rwlock_rdlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_rdlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+  // Write lock
   ASSERT_EQ(0, pthread_rwlock_wrlock(&l));
   ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+  // Try writer lock
+  ASSERT_EQ(0, pthread_rwlock_trywrlock(&l));
+  ASSERT_EQ(EBUSY, pthread_rwlock_trywrlock(&l));
+  ASSERT_EQ(EBUSY, pthread_rwlock_tryrdlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+  // Try reader lock
+  ASSERT_EQ(0, pthread_rwlock_tryrdlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_tryrdlock(&l));
+  ASSERT_EQ(EBUSY, pthread_rwlock_trywrlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+  // Try writer lock after unlock
+  ASSERT_EQ(0, pthread_rwlock_wrlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+#ifdef __BIONIC__
+  // EDEADLK in "read after write"
+  ASSERT_EQ(0, pthread_rwlock_wrlock(&l));
+  ASSERT_EQ(EDEADLK, pthread_rwlock_rdlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+
+  // EDEADLK in "write after write"
+  ASSERT_EQ(0, pthread_rwlock_wrlock(&l));
+  ASSERT_EQ(EDEADLK, pthread_rwlock_wrlock(&l));
+  ASSERT_EQ(0, pthread_rwlock_unlock(&l));
+#endif
 
   ASSERT_EQ(0, pthread_rwlock_destroy(&l));
 }
 
-static int gOnceFnCallCount = 0;
+static int g_once_fn_call_count = 0;
 static void OnceFn() {
-  ++gOnceFnCallCount;
+  ++g_once_fn_call_count;
 }
 
 TEST(pthread, pthread_once_smoke) {
   pthread_once_t once_control = PTHREAD_ONCE_INIT;
   ASSERT_EQ(0, pthread_once(&once_control, OnceFn));
   ASSERT_EQ(0, pthread_once(&once_control, OnceFn));
-  ASSERT_EQ(1, gOnceFnCallCount);
+  ASSERT_EQ(1, g_once_fn_call_count);
 }
 
-static int gAtForkPrepareCalls = 0;
-static void AtForkPrepare1() { gAtForkPrepareCalls = (gAtForkPrepareCalls << 4) | 1; }
-static void AtForkPrepare2() { gAtForkPrepareCalls = (gAtForkPrepareCalls << 4) | 2; }
-static int gAtForkParentCalls = 0;
-static void AtForkParent1() { gAtForkParentCalls = (gAtForkParentCalls << 4) | 1; }
-static void AtForkParent2() { gAtForkParentCalls = (gAtForkParentCalls << 4) | 2; }
-static int gAtForkChildCalls = 0;
-static void AtForkChild1() { gAtForkChildCalls = (gAtForkChildCalls << 4) | 1; }
-static void AtForkChild2() { gAtForkChildCalls = (gAtForkChildCalls << 4) | 2; }
+static std::string pthread_once_1934122_result = "";
+
+static void Routine2() {
+  pthread_once_1934122_result += "2";
+}
+
+static void Routine1() {
+  pthread_once_t once_control_2 = PTHREAD_ONCE_INIT;
+  pthread_once_1934122_result += "1";
+  pthread_once(&once_control_2, &Routine2);
+}
+
+TEST(pthread, pthread_once_1934122) {
+  // Very old versions of Android couldn't call pthread_once from a
+  // pthread_once init routine. http://b/1934122.
+  pthread_once_t once_control_1 = PTHREAD_ONCE_INIT;
+  ASSERT_EQ(0, pthread_once(&once_control_1, &Routine1));
+  ASSERT_EQ("12", pthread_once_1934122_result);
+}
+
+static int g_atfork_prepare_calls = 0;
+static void AtForkPrepare1() { g_atfork_prepare_calls = (g_atfork_prepare_calls << 4) | 1; }
+static void AtForkPrepare2() { g_atfork_prepare_calls = (g_atfork_prepare_calls << 4) | 2; }
+static int g_atfork_parent_calls = 0;
+static void AtForkParent1() { g_atfork_parent_calls = (g_atfork_parent_calls << 4) | 1; }
+static void AtForkParent2() { g_atfork_parent_calls = (g_atfork_parent_calls << 4) | 2; }
+static int g_atfork_child_calls = 0;
+static void AtForkChild1() { g_atfork_child_calls = (g_atfork_child_calls << 4) | 1; }
+static void AtForkChild2() { g_atfork_child_calls = (g_atfork_child_calls << 4) | 2; }
 
 TEST(pthread, pthread_atfork) {
   ASSERT_EQ(0, pthread_atfork(AtForkPrepare1, AtForkParent1, AtForkChild1));
@@ -607,13 +724,13 @@ TEST(pthread, pthread_atfork) {
 
   // Child and parent calls are made in the order they were registered.
   if (pid == 0) {
-    ASSERT_EQ(0x12, gAtForkChildCalls);
+    ASSERT_EQ(0x12, g_atfork_child_calls);
     _exit(0);
   }
-  ASSERT_EQ(0x12, gAtForkParentCalls);
+  ASSERT_EQ(0x12, g_atfork_parent_calls);
 
   // Prepare calls are made in the reverse order.
-  ASSERT_EQ(0x21, gAtForkPrepareCalls);
+  ASSERT_EQ(0x21, g_atfork_prepare_calls);
 }
 
 TEST(pthread, pthread_attr_getscope) {
@@ -701,4 +818,82 @@ TEST(pthread, pthread_mutex_timedlock) {
 
   ASSERT_EQ(0, pthread_mutex_unlock(&m));
   ASSERT_EQ(0, pthread_mutex_destroy(&m));
+}
+
+TEST(pthread, pthread_attr_getstack__main_thread) {
+  // This test is only meaningful for the main thread, so make sure we're running on it!
+  ASSERT_EQ(getpid(), syscall(__NR_gettid));
+
+  // Get the main thread's attributes.
+  pthread_attr_t attributes;
+  ASSERT_EQ(0, pthread_getattr_np(pthread_self(), &attributes));
+
+  // Check that we correctly report that the main thread has no guard page.
+  size_t guard_size;
+  ASSERT_EQ(0, pthread_attr_getguardsize(&attributes, &guard_size));
+  ASSERT_EQ(0U, guard_size); // The main thread has no guard page.
+
+  // Get the stack base and the stack size (both ways).
+  void* stack_base;
+  size_t stack_size;
+  ASSERT_EQ(0, pthread_attr_getstack(&attributes, &stack_base, &stack_size));
+  size_t stack_size2;
+  ASSERT_EQ(0, pthread_attr_getstacksize(&attributes, &stack_size2));
+
+  // The two methods of asking for the stack size should agree.
+  EXPECT_EQ(stack_size, stack_size2);
+
+  // What does /proc/self/maps' [stack] line say?
+  void* maps_stack_hi = NULL;
+  FILE* fp = fopen("/proc/self/maps", "r");
+  ASSERT_TRUE(fp != NULL);
+  char line[BUFSIZ];
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    uintptr_t lo, hi;
+    char name[10];
+    sscanf(line, "%" PRIxPTR "-%" PRIxPTR " %*4s %*x %*x:%*x %*d %10s", &lo, &hi, name);
+    if (strcmp(name, "[stack]") == 0) {
+      maps_stack_hi = reinterpret_cast<void*>(hi);
+      break;
+    }
+  }
+  fclose(fp);
+
+  // The stack size should correspond to RLIMIT_STACK.
+  rlimit rl;
+  ASSERT_EQ(0, getrlimit(RLIMIT_STACK, &rl));
+  EXPECT_EQ(rl.rlim_cur, stack_size);
+
+  // The high address of the /proc/self/maps [stack] region should equal stack_base + stack_size.
+  // Remember that the stack grows down (and is mapped in on demand), so the low address of the
+  // region isn't very interesting.
+  EXPECT_EQ(maps_stack_hi, reinterpret_cast<uint8_t*>(stack_base) + stack_size);
+
+  //
+  // What if RLIMIT_STACK is smaller than the stack's current extent?
+  //
+  rl.rlim_cur = rl.rlim_max = 1024; // 1KiB. We know the stack must be at least a page already.
+  rl.rlim_max = RLIM_INFINITY;
+  ASSERT_EQ(0, setrlimit(RLIMIT_STACK, &rl));
+
+  ASSERT_EQ(0, pthread_getattr_np(pthread_self(), &attributes));
+  ASSERT_EQ(0, pthread_attr_getstack(&attributes, &stack_base, &stack_size));
+  ASSERT_EQ(0, pthread_attr_getstacksize(&attributes, &stack_size2));
+
+  EXPECT_EQ(stack_size, stack_size2);
+  ASSERT_EQ(1024U, stack_size);
+
+  //
+  // What if RLIMIT_STACK isn't a whole number of pages?
+  //
+  rl.rlim_cur = rl.rlim_max = 6666; // Not a whole number of pages.
+  rl.rlim_max = RLIM_INFINITY;
+  ASSERT_EQ(0, setrlimit(RLIMIT_STACK, &rl));
+
+  ASSERT_EQ(0, pthread_getattr_np(pthread_self(), &attributes));
+  ASSERT_EQ(0, pthread_attr_getstack(&attributes, &stack_base, &stack_size));
+  ASSERT_EQ(0, pthread_attr_getstacksize(&attributes, &stack_size2));
+
+  EXPECT_EQ(stack_size, stack_size2);
+  ASSERT_EQ(6666U, stack_size);
 }

@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(pwrite64)
     movq    %rcx, %r10
     movl    $__NR_pwrite64, %eax
@@ -11,7 +13,6 @@ ENTRY(pwrite64)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(pwrite64)

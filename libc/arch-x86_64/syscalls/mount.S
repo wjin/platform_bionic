@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(mount)
     movq    %rcx, %r10
     movl    $__NR_mount, %eax
@@ -11,7 +13,6 @@ ENTRY(mount)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(mount)

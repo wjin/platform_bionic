@@ -23,13 +23,9 @@
 #include <fcntl.h>
 
 #if defined(__BIONIC__)
-  #define ACCEPT4_SUPPORTED 1
   #define RECVMMSG_SUPPORTED 1
   #define SENDMMSG_SUPPORTED 1
 #elif defined(__GLIBC_PREREQ)
-  #if __GLIBC_PREREQ(2, 9)
-    #define ACCEPT4_SUPPORTED 1
-  #endif
   #if __GLIBC_PREREQ(2, 12)
     #define RECVMMSG_SUPPORTED 1
   #endif
@@ -37,8 +33,6 @@
     #define SENDMMSG_SUPPORTED 1
   #endif
 #endif
-
-#if defined(ACCEPT4_SUPPORTED) || defined(RECVMMSG_SUPPORTED) || defined(SENDMMSG_SUPPORTED)
 
 #define SOCK_PATH "test"
 
@@ -105,18 +99,12 @@ static void RunTest(void (*test_fn)(struct sockaddr_un*, int),
 
   close(fd);
 }
-#endif
 
 TEST(sys_socket, accept4_error) {
-#if defined(ACCEPT4_SUPPORTED)
   ASSERT_EQ(-1, accept4(-1, NULL, NULL, 0));
   ASSERT_EQ(EBADF, errno);
-#else
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
-#endif
 }
 
-#if defined(ACCEPT4_SUPPORTED)
 static void TestAccept4(struct sockaddr_un* addr, int fd) {
   socklen_t len = sizeof(*addr);
   int fd_acc = accept4(fd, reinterpret_cast<struct sockaddr*>(addr), &len, SOCK_CLOEXEC);
@@ -127,14 +115,9 @@ static void TestAccept4(struct sockaddr_un* addr, int fd) {
 
   close(fd_acc);
 }
-#endif
 
 TEST(sys_socket, accept4_smoke) {
-#if defined(ACCEPT4_SUPPORTED)
   RunTest(TestAccept4, NULL);
-#else
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
-#endif
 }
 
 #if defined(RECVMMSG_SUPPORTED)
@@ -179,7 +162,9 @@ static void TestRecvMMsg(struct sockaddr_un *addr, int fd) {
   memset(&ts, 0, sizeof(ts));
   ts.tv_sec = 5;
   ts.tv_nsec = 0;
-  ASSERT_EQ(NUM_RECV_MSGS, recvmmsg(fd_acc, msgs, NUM_RECV_MSGS, 0, &ts)) << strerror(errno);
+  ASSERT_EQ(NUM_RECV_MSGS,
+            static_cast<size_t>(recvmmsg(fd_acc, msgs, NUM_RECV_MSGS, 0, &ts)))
+           << strerror(errno);
   for (size_t i = 0; i < NUM_RECV_MSGS; i++) {
     ASSERT_STREQ(g_RecvMsgs[i], bufs[i]);
   }
@@ -247,7 +232,8 @@ static void TestSendMMsg(struct sockaddr_un *addr, int fd) {
     tv.tv_usec = 0;
     ASSERT_LT(0, select(fd_acc+1, &read_set, NULL, NULL, &tv));
     char buffer[100];
-    ASSERT_EQ(strlen(g_SendMsgs[i]) + 1, recv(fd_acc, buffer, sizeof(buffer), 0));
+    ASSERT_EQ(strlen(g_SendMsgs[i]) + 1,
+              static_cast<size_t>(recv(fd_acc, buffer, sizeof(buffer), 0)));
     ASSERT_STREQ(g_SendMsgs[i], buffer);
   }
 

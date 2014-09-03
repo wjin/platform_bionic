@@ -46,7 +46,6 @@
 #include <sys/auxv.h>
 #include <sys/mman.h>
 
-#include "atexit.h"
 #include "libc_init_common.h"
 #include "pthread_internal.h"
 
@@ -59,6 +58,8 @@
 // Returns the address of the next page after address 'x', unless 'x' is
 // itself at the start of a page.
 #define PAGE_END(x)    PAGE_START((x) + (PAGE_SIZE-1))
+
+extern "C" int __cxa_atexit(void (*)(void *), void *, void *);
 
 static void call_array(void(**list)()) {
   // First element is -1, list is null-terminated
@@ -85,7 +86,7 @@ static void apply_gnu_relro() {
 }
 
 __noreturn void __libc_init(void* raw_args,
-                            void (*onexit)(void),
+                            void (*onexit)(void) __unused,
                             int (*slingshot)(int, char**, char**),
                             structors_array_t const * const structors) {
   KernelArgumentBlock args(raw_args);

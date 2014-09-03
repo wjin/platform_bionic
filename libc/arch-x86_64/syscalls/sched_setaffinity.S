@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(sched_setaffinity)
     movl    $__NR_sched_setaffinity, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(sched_setaffinity)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(sched_setaffinity)

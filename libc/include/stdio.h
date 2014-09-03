@@ -38,6 +38,14 @@
 #ifndef	_STDIO_H_
 #define	_STDIO_H_
 
+/*
+ * This file must contain a reference to __gnuc_va_list so that GCC's
+ * fixincludes knows that that's what's being used for va_list, and so
+ * to leave our <stdio.h> alone. (fixincludes gets in the way of pointing
+ * one toolchain at various different sets of platform headers.)
+ * If you alter this comment, be sure to keep "__gnuc_va_list" in it!
+ */
+
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
@@ -223,12 +231,6 @@ ssize_t	 getdelim(char ** __restrict, size_t * __restrict, int,
 	    FILE * __restrict);
 ssize_t	 getline(char ** __restrict, size_t * __restrict, FILE * __restrict);
 
-#if __BSD_VISIBLE && !defined(__SYS_ERRLIST)
-#define __SYS_ERRLIST
-extern int sys_nerr;			/* perror(3) external variables */
-extern char *sys_errlist[];
-#endif
-
 void	 perror(const char *);
 int	 printf(const char * __restrict, ...)
 		__printflike(1, 2);
@@ -250,8 +252,13 @@ int	 vfprintf(FILE * __restrict, const char * __restrict, __va_list)
 int	 vprintf(const char * __restrict, __va_list)
 		__printflike(1, 0);
 
+int dprintf(int, const char * __restrict, ...) __printflike(2, 3);
+int vdprintf(int, const char * __restrict, __va_list) __printflike(2, 0);
+
 #ifndef __AUDIT__
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 201112L
 char* gets(char*) __warnattr("gets is very unsafe; consider using fgets");
+#endif
 int sprintf(char* __restrict, const char* __restrict, ...)
     __printflike(2, 3) __warnattr("sprintf is often misused; please use snprintf");
 char* tmpnam(char*) __warnattr("tmpnam possibly used unsafely; consider using mkstemp");
@@ -293,13 +300,8 @@ __END_DECLS
  */
 #if __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE
 #define	L_ctermid	1024	/* size for ctermid(); PATH_MAX */
-#define L_cuserid	9	/* size for cuserid(); UT_NAMESIZE + 1 */
 
 __BEGIN_DECLS
-#if 0 /* MISSING FROM BIONIC */
-char	*ctermid(char *);
-char	*cuserid(char *);
-#endif /* MISSING */
 FILE	*fdopen(int, const char *);
 int	 fileno(FILE *);
 
@@ -323,6 +325,11 @@ int	 putc_unlocked(int, FILE *);
 int	 putchar_unlocked(int);
 #endif /* __POSIX_VISIBLE >= 199506 */
 
+#if __POSIX_VISIBLE >= 200809
+FILE* fmemopen(void*, size_t, const char*);
+FILE* open_memstream(char**, size_t*);
+#endif /* __POSIX_VISIBLE >= 200809 */
+
 __END_DECLS
 
 #endif /* __BSD_VISIBLE || __POSIX_VISIBLE || __XPG_VISIBLE */
@@ -336,13 +343,16 @@ int	 asprintf(char ** __restrict, const char * __restrict, ...)
 		__printflike(2, 3);
 char	*fgetln(FILE * __restrict, size_t * __restrict);
 int	 fpurge(FILE *);
-int	 getw(FILE *);
-int	 putw(int, FILE *);
 void	 setbuffer(FILE *, char *, int);
 int	 setlinebuf(FILE *);
 int	 vasprintf(char ** __restrict, const char * __restrict,
     __va_list)
 		__printflike(2, 0);
+
+void clearerr_unlocked(FILE*);
+int feof_unlocked(FILE*);
+int ferror_unlocked(FILE*);
+
 __END_DECLS
 
 /*
@@ -358,21 +368,6 @@ __END_DECLS
 #define	fropen(cookie, fn) funopen(cookie, fn, 0, 0, 0)
 #define	fwopen(cookie, fn) funopen(cookie, 0, fn, 0, 0)
 #endif /* __BSD_VISIBLE */
-
-#ifdef _GNU_SOURCE
-/*
- * glibc defines dprintf(int, const char*, ...), which is poorly named
- * and likely to conflict with locally defined debugging printfs
- * fdprintf is a better name, and some programs that use fdprintf use a
- * #define fdprintf dprintf for compatibility
- */
-__BEGIN_DECLS
-int fdprintf(int, const char*, ...)
-		__printflike(2, 3);
-int vfdprintf(int, const char*, __va_list)
-		__printflike(2, 0);
-__END_DECLS
-#endif /* _GNU_SOURCE */
 
 #if defined(__BIONIC_FORTIFY)
 
@@ -423,7 +418,7 @@ int sprintf(char *dest, const char *format, ...)
 #endif
 
 extern char* __fgets_chk(char*, int, FILE*, size_t);
-extern char* __fgets_real(char*, int, FILE*) __asm__(__USER_LABEL_PREFIX__ "fgets");
+extern char* __fgets_real(char*, int, FILE*) __RENAME(fgets);
 __errordecl(__fgets_too_big_error, "fgets called with size bigger than buffer");
 __errordecl(__fgets_too_small_error, "fgets called with size less than zero");
 

@@ -764,7 +764,7 @@ send_vc(res_state statp,
 		struct sockaddr_storage peer;
 		socklen_t size = sizeof peer;
 		unsigned old_mark;
-		int mark_size = sizeof(old_mark);
+		socklen_t mark_size = sizeof(old_mark);
 		if (getpeername(statp->_vcsock,
 				(struct sockaddr *)(void *)&peer, &size) < 0 ||
 		    !sock_eq((struct sockaddr *)(void *)&peer, nsap) ||
@@ -779,7 +779,7 @@ send_vc(res_state statp,
 		if (statp->_vcsock >= 0)
 			res_nclose(statp);
 
-		statp->_vcsock = socket(nsap->sa_family, SOCK_STREAM, 0);
+		statp->_vcsock = socket(nsap->sa_family, SOCK_STREAM | SOCK_CLOEXEC, 0);
 		if (statp->_vcsock > highestFD) {
 			res_nclose(statp);
 			errno = ENOTSOCK;
@@ -1062,7 +1062,7 @@ send_dg(res_state statp,
 	nsap = get_nsaddr(statp, (size_t)ns);
 	nsaplen = get_salen(nsap);
 	if (EXT(statp).nssocks[ns] == -1) {
-		EXT(statp).nssocks[ns] = socket(nsap->sa_family, SOCK_DGRAM, 0);
+		EXT(statp).nssocks[ns] = socket(nsap->sa_family, SOCK_DGRAM | SOCK_CLOEXEC, 0);
 		if (EXT(statp).nssocks[ns] > highestFD) {
 			res_nclose(statp);
 			errno = ENOTSOCK;
@@ -1276,8 +1276,6 @@ Aerror(const res_state statp, FILE *file, const char *string, int error,
 	int save = errno;
 	char hbuf[NI_MAXHOST];
 	char sbuf[NI_MAXSERV];
-
-	alen = alen;
 
 	if ((statp->options & RES_DEBUG) != 0U) {
 		if (getnameinfo(address, (socklen_t)alen, hbuf, sizeof(hbuf),

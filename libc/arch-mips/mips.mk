@@ -4,13 +4,14 @@
 libc_common_src_files_mips := \
     bionic/legacy_32_bit_support.cpp \
     bionic/ndk_cruft.cpp \
+    bionic/time64.c \
+    upstream-openbsd/lib/libc/stdio/putw.c \
 
 # These are shared by all the 32-bit targets, but not the 64-bit ones.
 libc_bionic_src_files_mips += \
      bionic/mmap.cpp
 
 libc_common_src_files_mips += \
-    bionic/index.cpp \
     bionic/memchr.c \
     bionic/memcmp.c \
     bionic/memmove.c \
@@ -25,7 +26,10 @@ libc_common_src_files_mips += \
     upstream-freebsd/lib/libc/string/wcslen.c \
     upstream-freebsd/lib/libc/string/wcsrchr.c \
     upstream-freebsd/lib/libc/string/wmemcmp.c \
+    upstream-freebsd/lib/libc/string/wmemmove.c \
     upstream-openbsd/lib/libc/string/bcopy.c \
+    upstream-openbsd/lib/libc/string/stpcpy.c \
+    upstream-openbsd/lib/libc/string/stpncpy.c \
     upstream-openbsd/lib/libc/string/strcat.c \
     upstream-openbsd/lib/libc/string/strcmp.c \
     upstream-openbsd/lib/libc/string/strcpy.c \
@@ -43,11 +47,6 @@ libc_common_src_files_mips += \
     bionic/__strcat_chk.cpp \
 
 
-ifneq ($(ARCH_MIPS_HAS_FPU),true)
-libc_common_cflags_mips := \
-    -DSOFTFLOAT
-endif
-
 ##########################################
 ### CPU specific source files
 libc_bionic_src_files_mips += \
@@ -55,19 +54,28 @@ libc_bionic_src_files_mips += \
     arch-mips/bionic/bzero.S \
     arch-mips/bionic/cacheflush.cpp \
     arch-mips/bionic/_exit_with_stack_teardown.S \
-    arch-mips/bionic/futex_mips.S \
-    arch-mips/bionic/__get_sp.S \
-    arch-mips/bionic/memcmp16.S \
     arch-mips/bionic/_setjmp.S \
     arch-mips/bionic/setjmp.S \
-    arch-mips/bionic/__set_tls.c \
     arch-mips/bionic/sigsetjmp.S \
     arch-mips/bionic/syscall.S \
     arch-mips/bionic/vfork.S \
+
+ifndef ARCH_MIPS_REV6
+libc_bionic_src_files_mips += \
     arch-mips/string/memcpy.S \
     arch-mips/string/memset.S \
     arch-mips/string/mips_strlen.c \
 
+else
+libc_bionic_src_files_mips += \
+    bionic/memcpy.cpp \
+    bionic/memset.c
+libc_common_src_files_mips += \
+    upstream-openbsd/lib/libc/string/strlen.c
+endif
+
+libc_netbsd_src_files_mips := \
+    upstream-netbsd/common/lib/libc/hash/sha1/sha1.c \
 
 libc_crt_target_cflags_mips := \
     $($(my_2nd_arch_prefix)TARGET_GLOBAL_CFLAGS) \
@@ -81,3 +89,6 @@ libc_crt_target_crtbegin_so_file_mips := \
 
 libc_crt_target_so_cflags_mips := \
     -fPIC
+
+libc_crt_target_ldflags_mips := \
+    -melf32ltsmip

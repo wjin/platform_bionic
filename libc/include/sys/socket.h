@@ -107,7 +107,7 @@ struct cmsghdr {
   int cmsg_type;
 };
 
-#define CMSG_NXTHDR(mhdr, cmsg) cmsg_nxthdr((mhdr), (cmsg))
+#define CMSG_NXTHDR(mhdr, cmsg) __cmsg_nxthdr((mhdr), (cmsg))
 #define CMSG_ALIGN(len) ( ((len)+sizeof(long)-1) & ~(sizeof(long)-1) )
 #define CMSG_DATA(cmsg) ((void*)((char*)(cmsg) + CMSG_ALIGN(sizeof(struct cmsghdr))))
 #define CMSG_SPACE(len) (CMSG_ALIGN(sizeof(struct cmsghdr)) + CMSG_ALIGN(len))
@@ -117,7 +117,7 @@ struct cmsghdr {
    ? (struct cmsghdr*) (msg)->msg_control : (struct cmsghdr*) NULL)
 #define CMSG_OK(mhdr, cmsg) ((cmsg)->cmsg_len >= sizeof(struct cmsghdr) &&   (cmsg)->cmsg_len <= (unsigned long)   ((mhdr)->msg_controllen -   ((char*)(cmsg) - (char*)(mhdr)->msg_control)))
 
-struct cmsghdr* cmsg_nxthdr(struct msghdr*, struct cmsghdr*);
+struct cmsghdr* __cmsg_nxthdr(struct msghdr*, struct cmsghdr*);
 
 #define SCM_RIGHTS 0x01
 #define SCM_CREDENTIALS 0x02
@@ -294,8 +294,7 @@ __socketcall ssize_t recvfrom(int, void*, size_t, int, const struct sockaddr*, s
 #if defined(__BIONIC_FORTIFY)
 __errordecl(__recvfrom_error, "recvfrom called with size bigger than buffer");
 extern ssize_t __recvfrom_chk(int, void*, size_t, size_t, int, const struct sockaddr*, socklen_t*);
-extern ssize_t __recvfrom_real(int, void*, size_t, int, const struct sockaddr*, socklen_t*)
-    __asm__(__USER_LABEL_PREFIX__ "recvfrom");
+extern ssize_t __recvfrom_real(int, void*, size_t, int, const struct sockaddr*, socklen_t*) __RENAME(recvfrom);
 
 __BIONIC_FORTIFY_INLINE
 ssize_t recvfrom(int fd, void* buf, size_t len, int flags, const struct sockaddr* src_addr, socklen_t* addr_len) {

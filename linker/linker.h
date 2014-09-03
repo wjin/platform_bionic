@@ -30,10 +30,14 @@
 #define _LINKER_H_
 
 #include <elf.h>
+#include <inttypes.h>
 #include <link.h>
 #include <unistd.h>
+#include <android/dlext.h>
+#include <sys/stat.h>
 
 #include "private/libc_logging.h"
+#include "linked_list.h"
 
 #define DL_ERR(fmt, x...) \
     do { \
@@ -83,6 +87,9 @@
 #define FLAG_LINKED     0x00000001
 #define FLAG_EXE        0x00000004 // The main executable
 #define FLAG_LINKER     0x00000010 // The linker itself
+#define FLAG_NEW_SOINFO 0x40000000 // new soinfo format
+
+#define SOINFO_VERSION 1
 
 #define SOINFO_NAME_LEN 128
 
@@ -93,7 +100,20 @@ typedef void (*linker_function_t)();
 #define USE_RELA 1
 #endif
 
+struct soinfo;
+
+class SoinfoListAllocator {
+public:
+  static LinkedListEntry<soinfo>* alloc();
+  static void free(LinkedListEntry<soinfo>* entry);
+private:
+  // unconstructable
+  DISALLOW_IMPLICIT_CONSTRUCTORS(SoinfoListAllocator);
+};
+
 struct soinfo {
+ public:
+  typedef LinkedList<soinfo, SoinfoListAllocator> soinfo_list_t;
  public:
   char name[SOINFO_NAME_LEN];
   const ElfW(Phdr)* phdr;
@@ -179,30 +199,70 @@ struct soinfo {
 #endif
   bool has_DT_SYMBOLIC;
 
+  soinfo(const char* name, const struct stat* file_stat);
+
   void CallConstructors();
   void CallDestructors();
   void CallPreInitConstructors();
+  bool LinkImage(const android_dlextinfo* extinfo);
 
+  void add_child(soinfo* child);
+  void remove_all_links();
+
+  void set_st_dev(dev_t st_dev);
+  void set_st_ino(ino_t st_ino);
+  void set_has_ifuncs(bool ifunc);
+  ino_t get_st_ino();
+  dev_t get_st_dev();
+  bool get_has_ifuncs();
+
+  soinfo_list_t& get_children();
+
+  bool inline has_min_version(uint32_t min_version) {
+    return (flags & FLAG_NEW_SOINFO) != 0 && version >= min_version;
+  }
  private:
   void CallArray(const char* array_name, linker_function_t* functions, size_t count, bool reverse);
   void CallFunction(const char* function_name, linker_function_t function);
+  void resolve_ifunc_symbols();
+#if defined(USE_RELA)
+  int Relocate(ElfW(Rela)* rela, unsigned count);
+#else
+  int Relocate(ElfW(Rel)* rel, unsigned count);
+#endif
+
+ private:
+  // This part of the structure is only available
+  // when FLAG_NEW_SOINFO is set in this->flags.
+  uint32_t version;
+
+  // version >= 0
+  dev_t st_dev;
+  ino_t st_ino;
+
+  // dependency graph
+  soinfo_list_t children;
+  soinfo_list_t parents;
+
+  // version >= 1
+  bool has_ifuncs;
 };
 
-extern soinfo libdl_info;
+extern soinfo* get_libdl_info();
 
 void do_android_get_LD_LIBRARY_PATH(char*, size_t);
 void do_android_update_LD_LIBRARY_PATH(const char* ld_library_path);
-soinfo* do_dlopen(const char* name, int flags);
-int do_dlclose(soinfo* si);
+soinfo* do_dlopen(const char* name, int flags, const android_dlextinfo* extinfo);
+void do_dlclose(soinfo* si);
 
 ElfW(Sym)* dlsym_linear_lookup(const char* name, soinfo** found, soinfo* start);
 soinfo* find_containing_library(const void* addr);
 
 ElfW(Sym)* dladdr_find_symbol(soinfo* si, const void* addr);
-ElfW(Sym)* dlsym_handle_lookup(soinfo* si, const char* name);
+ElfW(Sym)* dlsym_handle_lookup(soinfo* si, soinfo** found, const char* name);
 
 void debuggerd_init();
-extern "C" abort_msg_t* gAbortMessage;
+extern "C" abort_msg_t* g_abort_message;
 extern "C" void notify_gdb_of_libraries();
 
 char* linker_get_error_buffer();

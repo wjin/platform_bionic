@@ -29,8 +29,10 @@
  * $Citrus$
  */
 
+#ifndef _FILEEXT_H_
+#define _FILEEXT_H_
+
 #include <pthread.h>
-#include "wcio.h"
 
 /*
  * file extension
@@ -60,3 +62,5 @@ do { \
 	(f)->_ext._base = (unsigned char *)(fext); \
 	_FILEEXT_INIT(f); \
 } while (0)
+
+#endif /* _FILEEXT_H_ */

@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(shutdown)
     movl    $__NR_shutdown, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(shutdown)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(shutdown)

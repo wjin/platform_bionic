@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(unshare)
     movl    $__NR_unshare, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(unshare)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(unshare)

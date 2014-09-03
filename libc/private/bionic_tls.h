@@ -31,6 +31,7 @@
 
 #include <sys/cdefs.h>
 #include <sys/limits.h>
+#include "bionic_macros.h"
 #include "__get_tls.h"
 
 __BEGIN_DECLS
@@ -46,32 +47,27 @@ __BEGIN_DECLS
  ** pre-allocated slot directly for performance reason).
  **/
 
-/* Well-known TLS slots. What data goes in which slot is arbitrary unless otherwise noted. */
+// Well-known TLS slots. What data goes in which slot is arbitrary unless otherwise noted.
 enum {
-  TLS_SLOT_SELF = 0, /* The kernel requires this specific slot for x86. */
+  TLS_SLOT_SELF = 0, // The kernel requires this specific slot for x86.
   TLS_SLOT_THREAD_ID,
   TLS_SLOT_ERRNO,
 
-  /* This slot in the child's TLS is used to synchronize the parent and child
-   * during thread initialization. The child finishes with this mutex before
-   * running any code that can set errno, so we can reuse the errno slot. */
-  TLS_SLOT_START_MUTEX = TLS_SLOT_ERRNO,
-
-  /* These two aren't used by bionic itself, but allow the graphics code to
-   * access TLS directly rather than using the pthread API. */
+  // These two aren't used by bionic itself, but allow the graphics code to
+  // access TLS directly rather than using the pthread API.
   TLS_SLOT_OPENGL_API = 3,
   TLS_SLOT_OPENGL = 4,
 
-  /* This slot is only used to pass information from the dynamic linker to
-   * libc.so when the C library is loaded in to memory. The C runtime init
-   * function will then clear it. Since its use is extremely temporary,
-   * we reuse an existing location that isn't needed during libc startup. */
+  // This slot is only used to pass information from the dynamic linker to
+  // libc.so when the C library is loaded in to memory. The C runtime init
+  // function will then clear it. Since its use is extremely temporary,
+  // we reuse an existing location that isn't needed during libc startup.
   TLS_SLOT_BIONIC_PREINIT = TLS_SLOT_OPENGL_API,
 
-  TLS_SLOT_STACK_GUARD = 5, /* GCC requires this specific slot for x86. */
+  TLS_SLOT_STACK_GUARD = 5, // GCC requires this specific slot for x86.
   TLS_SLOT_DLERROR,
 
-  TLS_SLOT_FIRST_USER_SLOT /* Must come last! */
+  TLS_SLOT_FIRST_USER_SLOT // Must come last!
 };
 
 /*
@@ -80,16 +76,21 @@ enum {
  * pthread_key_create; grep for GLOBAL_INIT_THREAD_LOCAL_BUFFER to find those. We need to manually
  * maintain that second number, but pthread_test will fail if we forget.
  */
-#define GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT 4
+#define GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT 5
 
-#define BIONIC_ALIGN(x, a) (((x) + (a - 1)) & ~(a - 1))
+#if defined(USE_JEMALLOC)
+/* jemalloc uses 5 keys for itself. */
+#define BIONIC_TLS_RESERVED_SLOTS (GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT + 5)
+#else
+#define BIONIC_TLS_RESERVED_SLOTS GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT
+#endif
 
 /*
  * Maximum number of elements in the TLS array.
  * This includes space for pthread keys and our own internal slots.
  * We need to round up to maintain stack alignment.
  */
-#define BIONIC_TLS_SLOTS BIONIC_ALIGN(PTHREAD_KEYS_MAX + TLS_SLOT_FIRST_USER_SLOT + GLOBAL_INIT_THREAD_LOCAL_BUFFER_COUNT, 4)
+#define BIONIC_TLS_SLOTS BIONIC_ALIGN(PTHREAD_KEYS_MAX + TLS_SLOT_FIRST_USER_SLOT + BIONIC_TLS_RESERVED_SLOTS, 4)
 
 __END_DECLS
 

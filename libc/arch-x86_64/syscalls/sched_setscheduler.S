@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(sched_setscheduler)
     movl    $__NR_sched_setscheduler, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(sched_setscheduler)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(sched_setscheduler)

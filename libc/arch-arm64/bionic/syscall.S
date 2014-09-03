@@ -29,13 +29,6 @@
 #include <private/bionic_asm.h>
 
 ENTRY(syscall)
-    /* create AAPCS frame pointer */
-    stp     x29, x30, [sp, #-16]!
-    mov     x29,  sp
-
-    /* store x8 */
-    str     x8,       [sp, #-16]!
-
     /* Move syscall No. from x0 to x8 */
     mov     x8, x0
     /* Move syscall parameters from x1 thru x6 to x0 thru x5 */
@@ -46,10 +39,6 @@ ENTRY(syscall)
     mov     x4, x5
     mov     x5, x6
     svc     #0
-
-    /* restore x8 */
-    ldr     x8,       [sp], #16
-    ldp     x29, x30, [sp], #16
 
     /* check if syscall returned successfully */
     cmn     x0, #(MAX_ERRNO + 1)

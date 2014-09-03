@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(sched_getparam)
     movl    $__NR_sched_getparam, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(sched_getparam)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(sched_getparam)

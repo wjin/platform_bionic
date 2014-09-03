@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(setpriority)
     movl    $__NR_setpriority, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(setpriority)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(setpriority)

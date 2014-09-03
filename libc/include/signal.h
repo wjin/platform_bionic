@@ -34,6 +34,7 @@
 #include <limits.h>		/* For LONG_BIT */
 #include <string.h>		/* For memset() */
 #include <sys/types.h>
+#include <asm/sigcontext.h>
 
 #if defined(__LP64__) || defined(__mips__)
 /* For 64-bit (and mips), the kernel's struct sigaction doesn't match the POSIX one,
@@ -59,6 +60,12 @@ typedef int sig_atomic_t;
 /* Userspace's NSIG is the kernel's _NSIG + 1. */
 #define _NSIG (_KERNEL__NSIG + 1)
 #define NSIG _NSIG
+
+/* We take a few real-time signals for ourselves. May as well use the same names as glibc. */
+#define SIGRTMIN (__libc_current_sigrtmin())
+#define SIGRTMAX (__libc_current_sigrtmax())
+extern int __libc_current_sigrtmin(void);
+extern int __libc_current_sigrtmax(void);
 
 extern const char* const sys_siglist[];
 extern const char* const sys_signame[]; /* BSD compatibility. */
@@ -96,8 +103,6 @@ struct sigaction {
 extern int sigaction(int, const struct sigaction*, struct sigaction*);
 
 extern sighandler_t signal(int, sighandler_t);
-extern sighandler_t bsd_signal(int, sighandler_t);
-extern sighandler_t sysv_signal(int, sighandler_t);
 
 extern int siginterrupt(int, int);
 

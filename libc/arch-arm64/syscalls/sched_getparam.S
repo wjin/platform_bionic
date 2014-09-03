@@ -2,16 +2,11 @@
 
 #include <private/bionic_asm.h>
 
-ENTRY(sched_getparam)
-    stp     x29, x30, [sp, #-16]!
-    mov     x29,  sp
-    str     x8,       [sp, #-16]!
+    .hidden __set_errno
 
+ENTRY(sched_getparam)
     mov     x8, __NR_sched_getparam
     svc     #0
-
-    ldr     x8,       [sp], #16
-    ldp     x29, x30, [sp], #16
 
     cmn     x0, #(MAX_ERRNO + 1)
     cneg    x0, x0, hi

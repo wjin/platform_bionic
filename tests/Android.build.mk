@@ -18,14 +18,24 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE := $(module)
 LOCAL_MODULE_TAGS := $(module_tag)
+ifeq ($(build_type),host)
+# Always make host multilib
+LOCAL_MULTILIB := both
+endif
+
+ifneq ($(findstring LIBRARY, $(build_target)),LIBRARY)
+    LOCAL_MODULE_STEM_32 := $(module)32
+    LOCAL_MODULE_STEM_64 := $(module)64
+else
+ifeq ($($(module)_install_to_out_data),true)
+    LOCAL_MODULE_PATH_32 := $($(TARGET_2ND_ARCH_VAR_PREFIX)TARGET_OUT_DATA_NATIVE_TESTS)/$(module)
+    LOCAL_MODULE_PATH_64 := $(TARGET_OUT_DATA_NATIVE_TESTS)/$(module)
+endif
+endif
 
 LOCAL_CLANG := $($(module)_clang_$(build_type))
 
 LOCAL_FORCE_STATIC_EXECUTABLE := $($(module)_force_static_executable)
-
-LOCAL_ADDITIONAL_DEPENDENCIES := \
-    $(LOCAL_PATH)/Android.mk \
-    $(LOCAL_PATH)/Android.build.mk \
 
 LOCAL_CFLAGS := \
     $(common_cflags) \

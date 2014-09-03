@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(lremovexattr)
     movl    $__NR_lremovexattr, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(lremovexattr)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(lremovexattr)

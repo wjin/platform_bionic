@@ -16,23 +16,64 @@
 
 #include "benchmark.h"
 
+#include <sys/syscall.h>
 #include <time.h>
 
-#if defined(__BIONIC__)
-
-// Used by the horrible android.text.format.Time class, which is used by Calendar. http://b/8270865.
-extern "C" void localtime_tz(const time_t* const timep, struct tm* tmp, const char* tz);
-
-static void BM_time_localtime_tz(int iters) {
+static void BM_time_clock_gettime(int iters) {
   StartBenchmarkTiming();
 
-  time_t now(time(NULL));
-  tm broken_down_time;
+  timespec t;
   for (int i = 0; i < iters; ++i) {
-    localtime_tz(&now, &broken_down_time, "Europe/Berlin");
+    clock_gettime(CLOCK_MONOTONIC, &t);
   }
 
   StopBenchmarkTiming();
 }
-BENCHMARK(BM_time_localtime_tz);
-#endif
+BENCHMARK(BM_time_clock_gettime);
+
+static void BM_time_clock_gettime_syscall(int iters) {
+  StartBenchmarkTiming();
+
+  timespec t;
+  for (int i = 0; i < iters; ++i) {
+    syscall(__NR_clock_gettime, CLOCK_MONOTONIC, &t);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_time_clock_gettime_syscall);
+
+static void BM_time_gettimeofday(int iters) {
+  StartBenchmarkTiming();
+
+  timeval tv;
+  for (int i = 0; i < iters; ++i) {
+    gettimeofday(&tv, NULL);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_time_gettimeofday);
+
+static void BM_time_gettimeofday_syscall(int iters) {
+  StartBenchmarkTiming();
+
+  timeval tv;
+  for (int i = 0; i < iters; ++i) {
+    syscall(__NR_gettimeofday, &tv, NULL);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_time_gettimeofday_syscall);
+
+static void BM_time_time(int iters) {
+  StartBenchmarkTiming();
+
+  for (int i = 0; i < iters; ++i) {
+    time(NULL);
+  }
+
+  StopBenchmarkTiming();
+}
+BENCHMARK(BM_time_time);

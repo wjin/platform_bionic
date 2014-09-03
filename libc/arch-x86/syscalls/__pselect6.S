@@ -2,20 +2,27 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(__pselect6)
     pushl   %ebx
-    pushl   %ecx
-    pushl   %edx
-    pushl   %esi
-    pushl   %edi
-    pushl   %ebp
-    .cfi_def_cfa_offset 24
+    .cfi_def_cfa_offset 8
     .cfi_rel_offset ebx, 0
-    .cfi_rel_offset ecx, 4
-    .cfi_rel_offset edx, 8
-    .cfi_rel_offset esi, 12
-    .cfi_rel_offset edi, 16
-    .cfi_rel_offset ebp, 20
+    pushl   %ecx
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset ecx, 0
+    pushl   %edx
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset edx, 0
+    pushl   %esi
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset esi, 0
+    pushl   %edi
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset edi, 0
+    pushl   %ebp
+    .cfi_adjust_cfa_offset 4
+    .cfi_rel_offset ebp, 0
     mov     28(%esp), %ebx
     mov     32(%esp), %ecx
     mov     36(%esp), %edx
@@ -30,7 +37,6 @@ ENTRY(__pselect6)
     pushl   %eax
     call    __set_errno
     addl    $4, %esp
-    orl     $-1, %eax
 1:
     popl    %ebp
     popl    %edi

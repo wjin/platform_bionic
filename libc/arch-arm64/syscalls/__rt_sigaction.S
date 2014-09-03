@@ -2,16 +2,11 @@
 
 #include <private/bionic_asm.h>
 
-ENTRY(__rt_sigaction)
-    stp     x29, x30, [sp, #-16]!
-    mov     x29,  sp
-    str     x8,       [sp, #-16]!
+    .hidden __set_errno
 
+ENTRY(__rt_sigaction)
     mov     x8, __NR_rt_sigaction
     svc     #0
-
-    ldr     x8,       [sp], #16
-    ldp     x29, x30, [sp], #16
 
     cmn     x0, #(MAX_ERRNO + 1)
     cneg    x0, x0, hi

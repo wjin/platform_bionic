@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(timerfd_create)
     movl    $__NR_timerfd_create, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(timerfd_create)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(timerfd_create)

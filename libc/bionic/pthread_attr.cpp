@@ -28,6 +28,13 @@
 
 #include <pthread.h>
 
+#include <inttypes.h>
+#include <stdio.h>
+#include <sys/resource.h>
+
+#include "private/bionic_string_utils.h"
+#include "private/ErrnoRestorer.h"
+#include "private/libc_logging.h"
 #include "pthread_internal.h"
 
 int pthread_attr_init(pthread_attr_t* attr) {
@@ -90,8 +97,8 @@ int pthread_attr_setstacksize(pthread_attr_t* attr, size_t stack_size) {
 }
 
 int pthread_attr_getstacksize(const pthread_attr_t* attr, size_t* stack_size) {
-  *stack_size = attr->stack_size;
-  return 0;
+  void* unused;
+  return pthread_attr_getstack(attr, &unused, stack_size);
 }
 
 int pthread_attr_setstack(pthread_attr_t* attr, void* stack_base, size_t stack_size) {
@@ -106,7 +113,43 @@ int pthread_attr_setstack(pthread_attr_t* attr, void* stack_base, size_t stack_s
   return 0;
 }
 
+static int __pthread_attr_getstack_main_thread(void** stack_base, size_t* stack_size) {
+  ErrnoRestorer errno_restorer;
+
+  rlimit stack_limit;
+  if (getrlimit(RLIMIT_STACK, &stack_limit) == -1) {
+    return errno;
+  }
+
+  // If the current RLIMIT_STACK is RLIM_INFINITY, only admit to an 8MiB stack for sanity's sake.
+  if (stack_limit.rlim_cur == RLIM_INFINITY) {
+    stack_limit.rlim_cur = 8 * 1024 * 1024;
+  }
+
+  // It doesn't matter which thread we are; we're just looking for "[stack]".
+  FILE* fp = fopen("/proc/self/maps", "re");
+  if (fp == NULL) {
+    return errno;
+  }
+  char line[BUFSIZ];
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    if (ends_with(line, " [stack]\n")) {
+      uintptr_t lo, hi;
+      if (sscanf(line, "%" SCNxPTR "-%" SCNxPTR, &lo, &hi) == 2) {
+        *stack_size = stack_limit.rlim_cur;
+        *stack_base = reinterpret_cast<void*>(hi - *stack_size);
+        fclose(fp);
+        return 0;
+      }
+    }
+  }
+  __libc_fatal("No [stack] line found in /proc/self/maps!");
+}
+
 int pthread_attr_getstack(const pthread_attr_t* attr, void** stack_base, size_t* stack_size) {
+  if ((attr->flags & PTHREAD_ATTR_FLAG_MAIN_THREAD) != 0) {
+    return __pthread_attr_getstack_main_thread(stack_base, stack_size);
+  }
   *stack_base = attr->stack_base;
   *stack_size = attr->stack_size;
   return 0;
@@ -122,9 +165,8 @@ int pthread_attr_getguardsize(const pthread_attr_t* attr, size_t* guard_size) {
   return 0;
 }
 
-int pthread_getattr_np(pthread_t thid, pthread_attr_t* attr) {
-  pthread_internal_t* thread = (pthread_internal_t*) thid;
-  *attr = thread->attr;
+int pthread_getattr_np(pthread_t t, pthread_attr_t* attr) {
+  *attr = reinterpret_cast<pthread_internal_t*>(t)->attr;
   return 0;
 }
 

@@ -17,41 +17,14 @@
 #include <time.h>
 
 #include <errno.h>
-#include <features.h>
 #include <gtest/gtest.h>
+#include <pthread.h>
 #include <signal.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
 #include "ScopedSignalHandler.h"
-
-#if defined(__BIONIC__) // mktime_tz is a bionic extension.
-#include <libc/private/bionic_time.h>
-#endif // __BIONIC__
-
-TEST(time, mktime_tz) {
-#if defined(__BIONIC__)
-  struct tm epoch;
-  memset(&epoch, 0, sizeof(tm));
-  epoch.tm_year = 1970 - 1900;
-  epoch.tm_mon = 1;
-  epoch.tm_mday = 1;
-
-  // Alphabetically first. Coincidentally equivalent to UTC.
-  ASSERT_EQ(2678400, mktime_tz(&epoch, "Africa/Abidjan"));
-
-  // Alphabetically last. Coincidentally equivalent to UTC.
-  ASSERT_EQ(2678400, mktime_tz(&epoch, "Zulu"));
-
-  // Somewhere in the middle, not UTC.
-  ASSERT_EQ(2707200, mktime_tz(&epoch, "America/Los_Angeles"));
-
-  // Missing. Falls back to UTC.
-  ASSERT_EQ(2678400, mktime_tz(&epoch, "PST"));
-#else // __BIONIC__
-  GTEST_LOG_(INFO) << "This test does nothing.\n";
-#endif // __BIONIC__
-}
 
 TEST(time, gmtime) {
   time_t t = 0;
@@ -65,6 +38,37 @@ TEST(time, gmtime) {
   ASSERT_EQ(1970, broken_down->tm_year + 1900);
 }
 
+static void* gmtime_no_stack_overflow_14313703_fn(void*) {
+  const char* original_tz = getenv("TZ");
+  // Ensure we'll actually have to enter tzload by using a time zone that doesn't exist.
+  setenv("TZ", "gmtime_stack_overflow_14313703", 1);
+  tzset();
+  if (original_tz != NULL) {
+    setenv("TZ", original_tz, 1);
+  }
+  tzset();
+  return NULL;
+}
+
+TEST(time, gmtime_no_stack_overflow_14313703) {
+  // Is it safe to call tzload on a thread with a small stack?
+  // http://b/14313703
+  // https://code.google.com/p/android/issues/detail?id=61130
+  pthread_attr_t attributes;
+  ASSERT_EQ(0, pthread_attr_init(&attributes));
+#if defined(__BIONIC__)
+  ASSERT_EQ(0, pthread_attr_setstacksize(&attributes, PTHREAD_STACK_MIN));
+#else
+  // PTHREAD_STACK_MIN not currently in the host GCC sysroot.
+  ASSERT_EQ(0, pthread_attr_setstacksize(&attributes, 4 * getpagesize()));
+#endif
+
+  pthread_t t;
+  ASSERT_EQ(0, pthread_create(&t, &attributes, gmtime_no_stack_overflow_14313703_fn, NULL));
+  void* result;
+  ASSERT_EQ(0, pthread_join(t, &result));
+}
+
 TEST(time, mktime_10310929) {
   struct tm t;
   memset(&t, 0, sizeof(tm));
@@ -75,9 +79,6 @@ TEST(time, mktime_10310929) {
 #if !defined(__LP64__)
   // 32-bit bionic stupidly had a signed 32-bit time_t.
   ASSERT_EQ(-1, mktime(&t));
-#if defined(__BIONIC__)
-  ASSERT_EQ(-1, mktime_tz(&t, "UTC"));
-#endif
 #else
   // Everyone else should be using a signed 64-bit time_t.
   ASSERT_GE(sizeof(time_t) * 8, 64U);
@@ -85,16 +86,10 @@ TEST(time, mktime_10310929) {
   setenv("TZ", "America/Los_Angeles", 1);
   tzset();
   ASSERT_EQ(static_cast<time_t>(4108348800U), mktime(&t));
-#if defined(__BIONIC__)
-  ASSERT_EQ(static_cast<time_t>(4108320000U), mktime_tz(&t, "UTC"));
-#endif
 
   setenv("TZ", "UTC", 1);
   tzset();
   ASSERT_EQ(static_cast<time_t>(4108320000U), mktime(&t));
-#if defined(__BIONIC__)
-  ASSERT_EQ(static_cast<time_t>(4108348800U), mktime_tz(&t, "America/Los_Angeles"));
-#endif
 #endif
 }
 
@@ -386,4 +381,24 @@ TEST(time, timer_delete_from_timer_thread) {
   while (pthread_detach(tdd.thread_id) != ESRCH && (time(NULL) - cur_time) < 5);
   ASSERT_EQ(ESRCH, pthread_detach(tdd.thread_id));
 #endif
+}
+
+TEST(time, clock_gettime) {
+  // Try to ensure that our vdso clock_gettime is working.
+  timespec ts1;
+  ASSERT_EQ(0, clock_gettime(CLOCK_MONOTONIC, &ts1));
+  timespec ts2;
+  ASSERT_EQ(0, syscall(__NR_clock_gettime, CLOCK_MONOTONIC, &ts2));
+
+  // What's the difference between the two?
+  ts2.tv_sec -= ts1.tv_sec;
+  ts2.tv_nsec -= ts1.tv_nsec;
+  if (ts2.tv_nsec < 0) {
+    --ts2.tv_sec;
+    ts2.tv_nsec += 1000000000;
+  }
+
+  // Should be less than (a very generous, to try to avoid flakiness) 1000000ns.
+  ASSERT_EQ(0, ts2.tv_sec);
+  ASSERT_LT(ts2.tv_nsec, 1000000);
 }

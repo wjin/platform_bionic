@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(sched_get_priority_max)
     movl    $__NR_sched_get_priority_max, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(sched_get_priority_max)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(sched_get_priority_max)

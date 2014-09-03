@@ -46,7 +46,9 @@
 
     .ent	__start
     .globl	__start
+    .globl	_start
 __start:
+_start:
     .set	noreorder
     bal		1f
      nop
@@ -120,9 +122,3 @@ __start:
     move	t9, v0
     j		t9
     .end    __start
-
-/* FIXME:Is this still needed? */
-    .section .ctors, "wa"
-    .globl __CTOR_LIST__
-__CTOR_LIST__:
-    .long -1

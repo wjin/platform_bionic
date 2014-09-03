@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(dup3)
     movl    $__NR_dup3, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(dup3)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(dup3)

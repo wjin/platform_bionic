@@ -2,6 +2,8 @@
 
 #include <private/bionic_asm.h>
 
+    .hidden __set_errno
+
 ENTRY(clock_getres)
     movl    $__NR_clock_getres, %eax
     syscall
@@ -10,7 +12,6 @@ ENTRY(clock_getres)
     negl    %eax
     movl    %eax, %edi
     call    __set_errno
-    orq     $-1, %rax
 1:
     ret
 END(clock_getres)

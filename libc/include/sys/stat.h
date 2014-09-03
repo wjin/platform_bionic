@@ -25,6 +25,7 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
+
 #ifndef _SYS_STAT_H_
 #define _SYS_STAT_H_
 
@@ -130,6 +131,8 @@ __BEGIN_DECLS
 struct stat { __STAT64_BODY };
 struct stat64 { __STAT64_BODY };
 
+#undef __STAT64_BODY
+
 #define st_atimensec st_atime_nsec
 #define st_mtimensec st_mtime_nsec
 #define st_ctimensec st_ctime_nsec
@@ -160,7 +163,7 @@ extern mode_t umask(mode_t);
 #if defined(__BIONIC_FORTIFY)
 
 extern mode_t __umask_chk(mode_t);
-extern mode_t __umask_real(mode_t) __asm__(__USER_LABEL_PREFIX__ "umask");
+extern mode_t __umask_real(mode_t) __RENAME(umask);
 __errordecl(__umask_invalid_mode, "umask called with invalid mode");
 
 __BIONIC_FORTIFY_INLINE
